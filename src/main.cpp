@@ -120,8 +120,14 @@ void setup() {
   }
 
   scalePreferences.begin("pourframe-scale", false);
-  upperScale.begin(scalePreferences.getFloat("upper_factor", kDefaultScaleFactor));
-  lowerScale.begin(scalePreferences.getFloat("lower_factor", kDefaultScaleFactor));
+  const float upperFactor = scalePreferences.isKey("upper_factor")
+                                ? scalePreferences.getFloat("upper_factor", kDefaultScaleFactor)
+                                : kDefaultScaleFactor;
+  const float lowerFactor = scalePreferences.isKey("lower_factor")
+                                ? scalePreferences.getFloat("lower_factor", kDefaultScaleFactor)
+                                : kDefaultScaleFactor;
+  upperScale.begin(upperFactor);
+  lowerScale.begin(lowerFactor);
 
   commandQueue = xQueueCreate(kCommandQueueLength, sizeof(AppCommand));
   if (commandQueue == nullptr) {

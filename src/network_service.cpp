@@ -8,6 +8,9 @@
 
 namespace {
 constexpr uint8_t kDnsPort = 53;
+constexpr uint8_t kSetupApChannel = 6;
+const IPAddress kSetupApAddress(192, 168, 4, 1);
+const IPAddress kSetupApNetmask(255, 255, 255, 0);
 
 bool validRequestId(const char *value) {
   if (value == nullptr) {
@@ -38,8 +41,8 @@ NetworkService::NetworkService() : server_(80), webSocket_("/ws") {}
 void NetworkService::begin(QueueHandle_t commandQueue) {
   commandQueue_ = commandQueue;
   preferences_.begin("pourframe-wifi", false);
-  savedSsid_ = preferences_.getString("ssid", "");
-  savedPassword_ = preferences_.getString("password", "");
+  savedSsid_ = preferences_.isKey("ssid") ? preferences_.getString("ssid", "") : "";
+  savedPassword_ = preferences_.isKey("password") ? preferences_.getString("password", "") : "";
 
   webSocket_.onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg,
                             uint8_t *data, size_t length) {
@@ -47,8 +50,11 @@ void NetworkService::begin(QueueHandle_t commandQueue) {
   });
   server_.addHandler(&webSocket_);
   configureRoutes();
-  server_.begin();
 
+  // AsyncTCP requires the ESP32 network stack to exist before the server is
+  // started. Starting AsyncWebServer first triggers an "Invalid mbox" lwIP
+  // assertion on a fresh boot, before the provisioning AP can be created.
+  Serial.println("Wi-Fi: initializing network stack");
   WiFi.persistent(false);
   WiFi.setAutoReconnect(false);
   if (savedSsid_.isEmpty()) {
@@ -56,6 +62,9 @@ void NetworkService::begin(QueueHandle_t commandQueue) {
   } else {
     beginStationConnection(millis());
   }
+
+  server_.begin();
+  Serial.println("HTTP server started on port 80");
 }
 
 void NetworkService::loop(uint32_t nowMs) {
@@ -354,11 +363,31 @@ void NetworkService::startAccessPoint() {
   char name[32];
   snprintf(name, sizeof(name), "Pourframe-Setup-%04X", suffix);
   setupSsid_ = name;
-  WiFi.mode(WIFI_AP_STA);
-  if (WiFi.softAP(setupSsid_.c_str())) {
+  Serial.printf("Wi-Fi: starting setup AP %s\n", setupSsid_.c_str());
+
+  // On first boot there is no station to connect, so keep the radio in pure
+  // AP mode. AP+STA is enabled later when submitted credentials are tested.
+  const wifi_mode_t mode = savedSsid_.isEmpty() ? WIFI_AP : WIFI_AP_STA;
+  if (!WiFi.mode(mode)) {
+    Serial.println("Wi-Fi: failed to enter provisioning radio mode");
+    return;
+  }
+  WiFi.setSleep(false);
+  if (!WiFi.setTxPower(WIFI_POWER_19_5dBm)) {
+    Serial.println("Wi-Fi: could not set maximum transmit power");
+  }
+  if (!WiFi.softAPConfig(kSetupApAddress, kSetupApAddress, kSetupApNetmask)) {
+    Serial.println("Wi-Fi: could not configure setup AP address");
+    return;
+  }
+  if (WiFi.softAP(setupSsid_.c_str(), nullptr, kSetupApChannel, 0, kMaxWebSocketClients)) {
     accessPointActive_ = true;
     dnsServer_.start(kDnsPort, "*", WiFi.softAPIP());
-    Serial.printf("Setup AP: %s, portal=%s\n", setupSsid_.c_str(), WiFi.softAPIP().toString().c_str());
+    Serial.printf("Setup AP: %s, portal=%s, channel=%u, MAC=%s, power=%d\n", setupSsid_.c_str(),
+                  WiFi.softAPIP().toString().c_str(), kSetupApChannel, WiFi.softAPmacAddress().c_str(),
+                  static_cast<int>(WiFi.getTxPower()));
+  } else {
+    Serial.println("Wi-Fi: softAP creation failed");
   }
 }
 
