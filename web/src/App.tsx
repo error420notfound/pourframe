@@ -113,22 +113,26 @@ interface CalibrationModalProps {
   onSubmit: (knownGrams: number) => Promise<void>
 }
 
+type CalibrationUnit = 'g' | 'kg'
+
 function CalibrationModal({ channel, onClose, onSubmit }: CalibrationModalProps) {
-  const [knownGrams, setKnownGrams] = useState('100')
+  const [knownWeight, setKnownWeight] = useState('100')
+  const [unit, setUnit] = useState<CalibrationUnit>('g')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const value = Number(knownGrams)
+    const value = Number(knownWeight)
     if (!Number.isFinite(value) || value <= 0) {
       setError('Enter a positive reference weight.')
       return
     }
+    const knownGrams = unit === 'kg' ? value * 1000 : value
     setSubmitting(true)
     setError('')
     try {
-      await onSubmit(value)
+      await onSubmit(knownGrams)
       onClose()
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Calibration could not start.')
@@ -139,20 +143,28 @@ function CalibrationModal({ channel, onClose, onSubmit }: CalibrationModalProps)
   return (
     <Modal title={`Calibrate ${channel === 'upper' ? 'Upper / Dripper' : 'Lower / Carafe'}`} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p>Tare the empty platform first, place a known weight, then start the ten-sample calibration.</p>
+        <p>Tare the empty platform first, place a known weight, choose its unit, then start the ten-sample calibration.</p>
         <label htmlFor="known-weight">Known weight</label>
         <div className="input-with-unit">
           <input
             autoFocus
             id="known-weight"
             min="0.1"
-            onChange={(event) => setKnownGrams(event.target.value)}
+            onChange={(event) => setKnownWeight(event.target.value)}
             step="0.1"
             type="number"
-            value={knownGrams}
+            value={knownWeight}
           />
-          <span>g</span>
+          <select
+            aria-label="Reference weight unit"
+            onChange={(event) => setUnit(event.target.value as CalibrationUnit)}
+            value={unit}
+          >
+            <option value="g">g</option>
+            <option value="kg">kg</option>
+          </select>
         </div>
+        <small className="form-hint">For example: enter 1000 g or 1 kg for a one-kilogram reference.</small>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <button className="button button--primary button--full" disabled={submitting} type="submit">
           {submitting ? 'Starting…' : 'Start calibration'}

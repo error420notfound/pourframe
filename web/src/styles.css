@@ -30,7 +30,7 @@ body {
 button, input { font: inherit; }
 button { color: inherit; }
 
-button:focus-visible, input:focus-visible {
+button:focus-visible, input:focus-visible, select:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--focus) 38%, transparent);
   outline-offset: 3px;
 }
@@ -333,9 +333,16 @@ button:focus-visible, input:focus-visible {
   color: var(--text);
 }
 
-.input-with-unit { position: relative; }
-.input-with-unit input { padding-right: 46px; }
-.input-with-unit span { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.input-with-unit { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: 10px; }
+.input-with-unit select {
+  height: 52px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--text);
+}
+.form-hint { margin-top: -6px; color: var(--muted); line-height: 1.4; }
 .form-error { color: var(--danger) !important; font-size: 0.9rem; }
 .form-status { color: var(--success) !important; font-size: 0.9rem; }
 

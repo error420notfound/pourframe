@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <FastLED.h>
 #include <HX711.h>
 
 namespace {
@@ -6,12 +7,35 @@ constexpr uint8_t kUpperDout = 4;
 constexpr uint8_t kUpperClock = 5;
 constexpr uint8_t kLowerDout = 6;
 constexpr uint8_t kLowerClock = 7;
+constexpr uint8_t kRgbDataPin = 0;
+constexpr uint8_t kRgbLedCount = 1;
+constexpr uint8_t kRgbBrightness = 64;
+constexpr uint32_t kRainbowStepIntervalMs = 20;
 constexpr uint32_t kReadTimeoutMs = 150;
 constexpr uint32_t kReportIntervalMs = 500;
 
 HX711 upper;
 HX711 lower;
+CRGB rgbLeds[kRgbLedCount];
 uint32_t lastReportMs = 0;
+uint32_t lastRainbowStepMs = 0;
+uint8_t rainbowHue = 0;
+
+void beginRgbLed() {
+  FastLED.addLeds<WS2812B, kRgbDataPin, GRB>(rgbLeds, kRgbLedCount).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(kRgbBrightness);
+  rgbLeds[0] = CHSV(rainbowHue, 255, 255);
+  FastLED.show();
+}
+
+void updateRainbow(uint32_t nowMs) {
+  if (nowMs - lastRainbowStepMs < kRainbowStepIntervalMs) {
+    return;
+  }
+  lastRainbowStepMs = nowMs;
+  rgbLeds[0] = CHSV(++rainbowHue, 255, 255);
+  FastLED.show();
+}
 
 void reportChannel(const char *label, HX711 &channel) {
   bool ready = channel.is_ready();
@@ -32,12 +56,15 @@ void setup() {
   delay(500);
   Serial.println("\nPourframe HX711 hardware validation");
   Serial.printf("Upper DOUT=%u SCK=%u; Lower DOUT=%u SCK=%u\n", kUpperDout, kUpperClock, kLowerDout, kLowerClock);
+  Serial.printf("WS2812 data pin=%u count=%u brightness=%u/255\n", kRgbDataPin, kRgbLedCount, kRgbBrightness);
+  beginRgbLed();
   upper.begin(kUpperDout, kUpperClock, 128);
   lower.begin(kLowerDout, kLowerClock, 128);
 }
 
 void loop() {
   const uint32_t now = millis();
+  updateRainbow(now);
   if (now - lastReportMs >= kReportIntervalMs) {
     lastReportMs = now;
     reportChannel("upper", upper);
