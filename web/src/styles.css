@@ -36,9 +36,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .app-shell {
-  height: 100dvh;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow-x: hidden;
   border: 1px solid var(--border);
   background: var(--background);
 }
@@ -199,7 +198,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .signal--active { color: var(--accent); }
 
 .raw-reading {
-  margin: 16px 0 38px;
+  margin: 16px 0 24px;
   color: #302d2b;
   font-size: clamp(1.15rem, 1.8vw, 1.65rem);
   line-height: 1.3;
@@ -208,6 +207,83 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 
 .raw-reading span { margin-right: 18px; }
+
+.target-control {
+  margin: 0 0 28px;
+  padding: 18px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 12px;
+}
+
+.target-control__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.target-control__heading label { font-weight: 650; }
+.target-control__heading span { color: var(--muted); font-size: 0.82rem; }
+
+.target-control__entry {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 8px;
+}
+
+.target-control__input {
+  height: 46px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  background: #fff;
+}
+
+.target-control__input input {
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.target-control__input input:focus { outline: 0; }
+.target-control__input span { padding-right: 12px; color: var(--muted); }
+
+.target-button {
+  min-width: 70px;
+  height: 46px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 0 14px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.target-button--save { border-color: var(--accent); background: var(--accent); color: #fff; }
+.target-button:disabled, .target-chip:disabled { cursor: not-allowed; opacity: 0.48; }
+
+.target-history { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.target-history > span { margin-right: 2px; color: var(--muted); font-size: 0.78rem; }
+
+.target-chip {
+  min-height: 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.target-chip--active { border-color: var(--accent); background: #f5eeea; color: var(--accent); }
 
 .scale-actions { display: grid; grid-template-columns: 1.2fr 1fr; gap: 46px; }
 
@@ -380,6 +456,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   .weight > span { font-size: clamp(5.5rem, 29vw, 8rem); }
   .weight small { margin-left: 8px; font-size: 2rem; }
   .raw-reading { margin: 8px 0 24px; font-size: 1rem; }
+  .target-control__entry { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .target-button { min-width: 62px; padding: 0 10px; }
   .scale-actions { gap: 12px; }
   .button { min-height: 56px; padding: 0 12px; font-size: 1rem; }
   .action-message { font-size: 0.72rem; }

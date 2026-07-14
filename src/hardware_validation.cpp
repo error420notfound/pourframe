@@ -7,9 +7,9 @@ constexpr uint8_t kUpperDout = 4;
 constexpr uint8_t kUpperClock = 5;
 constexpr uint8_t kLowerDout = 6;
 constexpr uint8_t kLowerClock = 7;
-constexpr uint8_t kRgbDataPin = 0;
+constexpr uint8_t kRgbDataPin = 3;
 constexpr uint8_t kRgbLedCount = 1;
-constexpr uint8_t kRgbBrightness = 64;
+constexpr uint8_t kRgbBrightness = 255;
 constexpr uint32_t kRainbowStepIntervalMs = 20;
 constexpr uint32_t kReadTimeoutMs = 150;
 constexpr uint32_t kReportIntervalMs = 500;
@@ -24,8 +24,12 @@ uint8_t rainbowHue = 0;
 void beginRgbLed() {
   FastLED.addLeds<WS2812B, kRgbDataPin, GRB>(rgbLeds, kRgbLedCount).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(kRgbBrightness);
-  rgbLeds[0] = CHSV(rainbowHue, 255, 255);
-  FastLED.show();
+  const CRGB startupColors[] = {CRGB::Red, CRGB::Green, CRGB::Blue, CRGB::White, CRGB::Black};
+  for (const CRGB &color : startupColors) {
+    rgbLeds[0] = color;
+    FastLED.show();
+    delay(500);
+  }
 }
 
 void updateRainbow(uint32_t nowMs) {

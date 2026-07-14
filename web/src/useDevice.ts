@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DeviceTelemetry, ProtocolAck, ProtocolError, ProtocolMessage, ScaleId } from './types'
+import type { DeviceCommand, DeviceTelemetry, ProtocolAck, ProtocolError, ProtocolMessage, ScaleId } from './types'
 
 type ConnectionState = 'connecting' | 'online' | 'offline'
 
@@ -28,6 +28,8 @@ const initialTelemetry: DeviceTelemetry = {
       disconnected: false,
       calibrating: false,
       last_sample_ms: 119_920,
+      target_grams: 20,
+      target_history_grams: [20, 18, 22],
     },
     lower: {
       raw: 892_031,
@@ -38,6 +40,8 @@ const initialTelemetry: DeviceTelemetry = {
       disconnected: false,
       calibrating: false,
       last_sample_ms: 119_920,
+      target_grams: 250,
+      target_history_grams: [250, 300, 200],
     },
   },
 }
@@ -164,7 +168,7 @@ export function useDevice() {
     }
   }, [])
 
-  const sendCommand = useCallback((command: 'tare' | 'calibrate', channel: ScaleId, knownGrams?: number) => {
+  const sendCommand = useCallback((command: DeviceCommand, channel: ScaleId, grams?: number) => {
     if (mockMode) {
       if (command === 'tare') {
         setTelemetry((current) =>
@@ -172,7 +176,7 @@ export function useDevice() {
             ? { ...current, scales: { ...current.scales, [channel]: { ...current.scales[channel], grams: 0 } } }
             : current,
         )
-      } else {
+      } else if (command === 'calibrate') {
         setTelemetry((current) =>
           current
             ? {
@@ -192,6 +196,32 @@ export function useDevice() {
           )
           setLastCalibration({ channel, ok: true })
         }, 1200)
+      } else if (command === 'set_target' && typeof grams === 'number') {
+        const rounded = Math.round(grams * 10) / 10
+        setTelemetry((current) => {
+          if (!current) return current
+          const scale = current.scales[channel]
+          const history = [rounded, ...(scale.target_history_grams ?? []).filter((value) => value !== rounded)].slice(0, 5)
+          return {
+            ...current,
+            scales: {
+              ...current.scales,
+              [channel]: { ...scale, target_grams: rounded, target_history_grams: history },
+            },
+          }
+        })
+      } else if (command === 'clear_target') {
+        setTelemetry((current) =>
+          current
+            ? {
+                ...current,
+                scales: {
+                  ...current.scales,
+                  [channel]: { ...current.scales[channel], target_grams: null },
+                },
+              }
+            : current,
+        )
       }
       return Promise.resolve({ v: 1, type: 'ack', id: 'mock', ok: true, message: 'Accepted' } as ProtocolAck)
     }
@@ -214,7 +244,8 @@ export function useDevice() {
           id,
           command,
           channel,
-          ...(command === 'calibrate' ? { known_grams: knownGrams } : {}),
+          ...(command === 'calibrate' ? { known_grams: grams } : {}),
+          ...(command === 'set_target' ? { target_grams: grams } : {}),
         }),
       )
     })

@@ -318,8 +318,18 @@ void NetworkService::handleWebSocketCommand(AsyncWebSocketClient *client, uint8_
       sendClientError(client, requestId, "invalid_calibration", "known_grams must be positive");
       return;
     }
+  } else if (strcmp(commandName, "set_target") == 0) {
+    command.type = CommandType::SetTarget;
+    command.targetGrams = document["target_grams"] | 0.0f;
+    if (!isfinite(command.targetGrams) || command.targetGrams <= 0.0f) {
+      sendClientError(client, requestId, "invalid_target", "target_grams must be positive");
+      return;
+    }
+  } else if (strcmp(commandName, "clear_target") == 0) {
+    command.type = CommandType::ClearTarget;
   } else {
-    sendClientError(client, requestId, "unknown_command", "Supported commands are tare and calibrate");
+    sendClientError(client, requestId, "unknown_command",
+                    "Supported commands are tare, calibrate, set_target, and clear_target");
     return;
   }
 

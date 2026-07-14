@@ -9,6 +9,8 @@ interface ScalePanelProps {
   scale: ScaleTelemetry | null
   onTare: (id: ScaleId) => Promise<void>
   onCalibrate: (id: ScaleId) => void
+  onSetTarget: (id: ScaleId, grams: number) => Promise<void>
+  onClearTarget: (id: ScaleId) => Promise<void>
 }
 
 function TickRail() {
@@ -32,13 +34,19 @@ function SignalLine({ active }: { active: boolean }) {
   )
 }
 
-function ScalePanel({ id, label, scale, onTare, onCalibrate }: ScalePanelProps) {
+function ScalePanel({ id, label, scale, onTare, onCalibrate, onSetTarget, onClearTarget }: ScalePanelProps) {
   const [actionMessage, setActionMessage] = useState('')
+  const [targetInput, setTargetInput] = useState(() => scale?.target_grams?.toFixed(1) ?? '')
+  const [targetSaving, setTargetSaving] = useState(false)
   const unavailable = !scale || scale.disconnected
   const ready = Boolean(scale?.ready && !scale.stale)
   const normalizedGrams = scale && Math.abs(scale.grams) < 0.05 ? 0 : scale?.grams
   const weight = unavailable ? '—' : normalizedGrams?.toFixed(1) ?? '—'
   const raw = scale?.available === false || !scale ? 'Unavailable' : scale.raw.toLocaleString('en-US')
+
+  useEffect(() => {
+    setTargetInput(scale?.target_grams?.toFixed(1) ?? '')
+  }, [scale?.target_grams])
 
   const tare = async () => {
     setActionMessage('Taring…')
@@ -47,6 +55,52 @@ function ScalePanel({ id, label, scale, onTare, onCalibrate }: ScalePanelProps) 
       setActionMessage('Tared')
     } catch (error) {
       setActionMessage(error instanceof Error ? error.message : 'Tare failed')
+    }
+  }
+
+  const saveTarget = async (event: FormEvent) => {
+    event.preventDefault()
+    const grams = Number(targetInput)
+    if (!Number.isFinite(grams) || grams <= 0) {
+      setActionMessage('Enter a positive target weight.')
+      return
+    }
+    setTargetSaving(true)
+    setActionMessage('Saving target…')
+    try {
+      await onSetTarget(id, grams)
+      setActionMessage(`Target set to ${Math.round(grams * 10) / 10} g`)
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Target could not be saved')
+    } finally {
+      setTargetSaving(false)
+    }
+  }
+
+  const clearTarget = async () => {
+    setTargetSaving(true)
+    setActionMessage('Clearing target…')
+    try {
+      await onClearTarget(id)
+      setActionMessage('Target cleared')
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Target could not be cleared')
+    } finally {
+      setTargetSaving(false)
+    }
+  }
+
+  const selectRecentTarget = async (grams: number) => {
+    setTargetInput(grams.toFixed(1))
+    setTargetSaving(true)
+    setActionMessage(`Selecting ${grams.toFixed(1)} g…`)
+    try {
+      await onSetTarget(id, grams)
+      setActionMessage(`Target set to ${grams.toFixed(1)} g`)
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Target could not be selected')
+    } finally {
+      setTargetSaving(false)
     }
   }
 
@@ -63,6 +117,54 @@ function ScalePanel({ id, label, scale, onTare, onCalibrate }: ScalePanelProps) 
         <p className="raw-reading">
           <span>Raw</span> {raw}
         </p>
+        <form className="target-control" onSubmit={saveTarget}>
+          <div className="target-control__heading">
+            <label htmlFor={`${id}-target`}>Target weight</label>
+            <span>{scale?.target_grams == null ? 'Not set' : `${scale.target_grams.toFixed(1)} g active`}</span>
+          </div>
+          <div className="target-control__entry">
+            <div className="target-control__input">
+              <input
+                id={`${id}-target`}
+                inputMode="decimal"
+                min="0.1"
+                onChange={(event) => setTargetInput(event.target.value)}
+                placeholder="0.0"
+                step="0.1"
+                type="number"
+                value={targetInput}
+              />
+              <span>g</span>
+            </div>
+            <button className="target-button target-button--save" disabled={targetSaving} type="submit">
+              {targetSaving ? 'Saving…' : 'Save'}
+            </button>
+            <button
+              className="target-button"
+              disabled={targetSaving || scale?.target_grams == null}
+              onClick={clearTarget}
+              type="button"
+            >
+              Clear
+            </button>
+          </div>
+          {scale?.target_history_grams?.length ? (
+            <div className="target-history" aria-label="Recent target weights">
+              <span>Recent</span>
+              {scale.target_history_grams.map((grams) => (
+                <button
+                  className={scale.target_grams === grams ? 'target-chip target-chip--active' : 'target-chip'}
+                  disabled={targetSaving}
+                  key={grams}
+                  onClick={() => selectRecentTarget(grams)}
+                  type="button"
+                >
+                  {grams.toFixed(1)} g
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </form>
         <div className="scale-actions">
           <button className="button button--primary" disabled={unavailable || scale?.calibrating} onClick={tare}>
             Tare
@@ -243,6 +345,9 @@ function App() {
   const tare = (channel: ScaleId) => sendCommand('tare', channel).then(() => undefined)
   const calibrate = (channel: ScaleId, knownGrams: number) =>
     sendCommand('calibrate', channel, knownGrams).then(() => undefined)
+  const setTarget = (channel: ScaleId, targetGrams: number) =>
+    sendCommand('set_target', channel, targetGrams).then(() => undefined)
+  const clearTarget = (channel: ScaleId) => sendCommand('clear_target', channel).then(() => undefined)
 
   const upper = telemetry?.scales.upper ?? null
   const lower = telemetry?.scales.lower ?? null
@@ -264,8 +369,24 @@ function App() {
       </header>
 
       <div className="scale-grid">
-        <ScalePanel id="upper" label="Upper / Dripper" onCalibrate={setCalibrationChannel} onTare={tare} scale={upper} />
-        <ScalePanel id="lower" label="Lower / Carafe" onCalibrate={setCalibrationChannel} onTare={tare} scale={lower} />
+        <ScalePanel
+          id="upper"
+          label="Upper / Dripper"
+          onCalibrate={setCalibrationChannel}
+          onClearTarget={clearTarget}
+          onSetTarget={setTarget}
+          onTare={tare}
+          scale={upper}
+        />
+        <ScalePanel
+          id="lower"
+          label="Lower / Carafe"
+          onCalibrate={setCalibrationChannel}
+          onClearTarget={clearTarget}
+          onSetTarget={setTarget}
+          onTare={tare}
+          scale={lower}
+        />
       </div>
 
       <section className="health-rail" aria-label="Device status">

@@ -10,6 +10,8 @@ enum class ScaleId : uint8_t {
 enum class CommandType : uint8_t {
   Tare,
   Calibrate,
+  SetTarget,
+  ClearTarget,
   SaveWifi,
 };
 
@@ -19,6 +21,7 @@ struct AppCommand {
   uint32_t clientId;
   char requestId[37];
   float knownGrams;
+  float targetGrams;
   char ssid[33];
   char password[65];
 };

@@ -7,6 +7,8 @@
 #include "app_types.h"
 #include "network_service.h"
 #include "scale_channel.h"
+#include "status_led.h"
+#include "target_store.h"
 
 namespace {
 constexpr uint8_t kUpperDout = 4;
@@ -21,6 +23,8 @@ ScaleChannel upperScale(ScaleId::Upper, kUpperDout, kUpperClock);
 ScaleChannel lowerScale(ScaleId::Lower, kLowerDout, kLowerClock);
 NetworkService network;
 Preferences scalePreferences;
+TargetStore targetStore;
+StatusLed statusLed;
 QueueHandle_t commandQueue = nullptr;
 uint32_t telemetrySequence = 0;
 uint32_t lastTelemetryMs = 0;
@@ -48,6 +52,18 @@ void processCommands() {
       continue;
     }
 
+    if (command.type == CommandType::SetTarget) {
+      const bool accepted = targetStore.setTarget(command.scale, command.targetGrams);
+      network.sendAck(command.clientId, command.requestId, accepted,
+                      accepted ? "Target weight saved" : "Invalid target weight");
+      continue;
+    }
+    if (command.type == CommandType::ClearTarget) {
+      targetStore.clearTarget(command.scale);
+      network.sendAck(command.clientId, command.requestId, true, "Target weight cleared");
+      continue;
+    }
+
     ScaleChannel &channel = channelFor(command.scale);
     if (command.type == CommandType::Tare) {
       const bool ok = channel.tare();
@@ -72,7 +88,7 @@ void processCalibrationResult(ScaleChannel &channel, const char *preferenceKey) 
   network.sendCalibrationEvent(channel.id(), succeeded, factor);
 }
 
-void addScaleTelemetry(JsonObject object, const ScaleSnapshot &snapshot) {
+void addScaleTelemetry(JsonObject object, const ScaleSnapshot &snapshot, const TargetConfig &target) {
   object["raw"] = snapshot.raw;
   object["grams"] = roundf(snapshot.grams * 100.0f) / 100.0f;
   object["available"] = snapshot.available;
@@ -81,6 +97,15 @@ void addScaleTelemetry(JsonObject object, const ScaleSnapshot &snapshot) {
   object["disconnected"] = snapshot.disconnected;
   object["calibrating"] = snapshot.calibrating;
   object["last_sample_ms"] = snapshot.lastSampleMs;
+  if (target.enabled && target.historyCount > 0) {
+    object["target_grams"] = target.activeGrams();
+  } else {
+    object["target_grams"] = nullptr;
+  }
+  JsonArray history = object["target_history_grams"].to<JsonArray>();
+  for (uint8_t index = 0; index < target.historyCount; ++index) {
+    history.add(target.history[index]);
+  }
 }
 
 void publishTelemetry(uint32_t nowMs) {
@@ -89,8 +114,10 @@ void publishTelemetry(uint32_t nowMs) {
   document["type"] = "telemetry";
   document["seq"] = telemetrySequence++;
   document["uptime_ms"] = nowMs;
-  addScaleTelemetry(document["scales"]["upper"].to<JsonObject>(), upperScale.snapshot(nowMs));
-  addScaleTelemetry(document["scales"]["lower"].to<JsonObject>(), lowerScale.snapshot(nowMs));
+  addScaleTelemetry(document["scales"]["upper"].to<JsonObject>(), upperScale.snapshot(nowMs),
+                    targetStore.config(ScaleId::Upper));
+  addScaleTelemetry(document["scales"]["lower"].to<JsonObject>(), lowerScale.snapshot(nowMs),
+                    targetStore.config(ScaleId::Lower));
   document["wifi"]["connected"] = network.connected();
   document["wifi"]["provisioning"] = network.accessPointActive();
   document["wifi"]["ssid"] = network.stationSsid();
@@ -120,6 +147,7 @@ void setup() {
   }
 
   scalePreferences.begin("pourframe-scale", false);
+  targetStore.begin(scalePreferences);
   const float upperFactor = scalePreferences.isKey("upper_factor")
                                 ? scalePreferences.getFloat("upper_factor", kDefaultScaleFactor)
                                 : kDefaultScaleFactor;
@@ -128,6 +156,7 @@ void setup() {
                                 : kDefaultScaleFactor;
   upperScale.begin(upperFactor);
   lowerScale.begin(lowerFactor);
+  statusLed.begin();
 
   commandQueue = xQueueCreate(kCommandQueueLength, sizeof(AppCommand));
   if (commandQueue == nullptr) {
@@ -146,6 +175,8 @@ void loop() {
   processCommands();
   processCalibrationResult(upperScale, "upper_factor");
   processCalibrationResult(lowerScale, "lower_factor");
+  statusLed.update(nowMs, upperScale.snapshot(nowMs), targetStore.config(ScaleId::Upper), lowerScale.snapshot(nowMs),
+                   targetStore.config(ScaleId::Lower));
   network.loop(nowMs);
 
   if (nowMs - lastTelemetryMs >= kTelemetryIntervalMs) {

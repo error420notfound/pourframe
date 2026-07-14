@@ -1,4 +1,5 @@
 export type ScaleId = 'upper' | 'lower'
+export type DeviceCommand = 'tare' | 'calibrate' | 'set_target' | 'clear_target'
 
 export interface ScaleTelemetry {
   raw: number
@@ -9,6 +10,8 @@ export interface ScaleTelemetry {
   disconnected: boolean
   calibrating: boolean
   last_sample_ms: number
+  target_grams?: number | null
+  target_history_grams?: number[]
 }
 
 export interface DeviceTelemetry {
