@@ -1,5 +1,7 @@
 export type ScaleId = 'upper' | 'lower'
+export type TargetId = ScaleId | 'total'
 export type DeviceCommand = 'tare' | 'calibrate' | 'set_target' | 'clear_target'
+export type LedState = 'normal' | 'approaching' | 'at_target' | 'overweight'
 
 export interface ScaleTelemetry {
   raw: number
@@ -14,12 +16,25 @@ export interface ScaleTelemetry {
   target_history_grams?: number[]
 }
 
+export interface TotalTelemetry {
+  grams: number | null
+  available: boolean
+  partial: boolean
+  upper_included: boolean
+  lower_included: boolean
+  target_grams?: number | null
+  target_history_grams?: number[]
+  led_state: LedState
+  led_proximity: number
+}
+
 export interface DeviceTelemetry {
   v: 1
   type: 'telemetry'
   seq: number
   uptime_ms: number
   scales: Record<ScaleId, ScaleTelemetry>
+  total: TotalTelemetry
   wifi: {
     connected: boolean
     provisioning: boolean

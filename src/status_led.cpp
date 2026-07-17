@@ -19,12 +19,10 @@ constexpr uint32_t kPurplePulseOnMs = 150;
 
 CRGB statusPixels[kLedCount];
 
-bool validReading(const ScaleSnapshot &snapshot, const TargetConfig &target) {
-  return target.enabled && target.historyCount > 0 && snapshot.available && snapshot.ready && !snapshot.stale &&
-         !snapshot.disconnected && !snapshot.calibrating && isfinite(snapshot.grams);
+bool usableReading(const ScaleSnapshot &snapshot) {
+  return snapshot.available && snapshot.ready && !snapshot.stale && !snapshot.disconnected &&
+         !snapshot.calibrating && isfinite(snapshot.grams);
 }
-
-uint8_t statePriority(TargetLedState state) { return static_cast<uint8_t>(state); }
 
 CRGB scaledColor(const CRGB &color, uint8_t scale) {
   CRGB output = color;
@@ -40,22 +38,36 @@ void StatusLed::begin() {
   FastLED.show();
 }
 
-void StatusLed::update(uint32_t nowMs, const ScaleSnapshot &upper, const TargetConfig &upperTarget,
-                       const ScaleSnapshot &lower, const TargetConfig &lowerTarget) {
+void StatusLed::update(uint32_t nowMs, const TotalWeightReading &reading, const TargetConfig &target) {
   if (nowMs - lastRenderMs_ < kRenderIntervalMs) {
     return;
   }
   lastRenderMs_ = nowMs;
-  render(nowMs, combine(evaluate(upper, upperTarget), evaluate(lower, lowerTarget)));
+  render(nowMs, evaluate(reading, target));
 }
 
-TargetLedEvaluation StatusLed::evaluate(const ScaleSnapshot &snapshot, const TargetConfig &target) {
-  if (!validReading(snapshot, target)) {
+TotalWeightReading StatusLed::totalReading(const ScaleSnapshot &upper, const ScaleSnapshot &lower) {
+  TotalWeightReading reading{};
+  reading.upperIncluded = usableReading(upper);
+  reading.lowerIncluded = usableReading(lower);
+  if (reading.upperIncluded) {
+    reading.grams += upper.grams;
+  }
+  if (reading.lowerIncluded) {
+    reading.grams += lower.grams;
+  }
+  reading.available = reading.upperIncluded || reading.lowerIncluded;
+  reading.partial = reading.upperIncluded != reading.lowerIncluded;
+  return reading;
+}
+
+TargetLedEvaluation StatusLed::evaluate(const TotalWeightReading &reading, const TargetConfig &target) {
+  if (!reading.available || !target.enabled || target.historyCount == 0 || !isfinite(reading.grams)) {
     return {};
   }
 
   const float targetGrams = target.activeGrams();
-  const float difference = snapshot.grams - targetGrams;
+  const float difference = reading.grams - targetGrams;
   if (difference > kTargetToleranceGrams) {
     return {TargetLedState::Overweight, 1.0f};
   }
@@ -65,23 +77,25 @@ TargetLedEvaluation StatusLed::evaluate(const ScaleSnapshot &snapshot, const Tar
 
   const float approachStart = targetGrams * kApproachFraction;
   const float approachEnd = targetGrams - kTargetToleranceGrams;
-  if (snapshot.grams >= approachStart && snapshot.grams < approachEnd) {
+  if (reading.grams >= approachStart && reading.grams < approachEnd) {
     const float window = approachEnd - approachStart;
-    const float proximity = window > 0.0f ? constrain((snapshot.grams - approachStart) / window, 0.0f, 1.0f) : 1.0f;
+    const float proximity = window > 0.0f ? constrain((reading.grams - approachStart) / window, 0.0f, 1.0f) : 1.0f;
     return {TargetLedState::Approaching, proximity};
   }
   return {};
 }
 
-TargetLedEvaluation StatusLed::combine(const TargetLedEvaluation &upper, const TargetLedEvaluation &lower) {
-  if (statePriority(lower.state) > statePriority(upper.state)) {
-    return lower;
+const char *StatusLed::stateName(TargetLedState state) {
+  if (state == TargetLedState::Approaching) {
+    return "approaching";
   }
-  if (upper.state == TargetLedState::Approaching && lower.state == TargetLedState::Approaching &&
-      lower.proximity > upper.proximity) {
-    return lower;
+  if (state == TargetLedState::AtTarget) {
+    return "at_target";
   }
-  return upper;
+  if (state == TargetLedState::Overweight) {
+    return "overweight";
+  }
+  return "normal";
 }
 
 void StatusLed::render(uint32_t nowMs, const TargetLedEvaluation &evaluation) {

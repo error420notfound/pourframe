@@ -20,16 +20,24 @@ struct TargetLedEvaluation {
   float proximity;
 };
 
+struct TotalWeightReading {
+  float grams = 0.0f;
+  bool available = false;
+  bool partial = false;
+  bool upperIncluded = false;
+  bool lowerIncluded = false;
+};
+
 class StatusLed {
  public:
   void begin();
-  void update(uint32_t nowMs, const ScaleSnapshot &upper, const TargetConfig &upperTarget,
-              const ScaleSnapshot &lower, const TargetConfig &lowerTarget);
+  void update(uint32_t nowMs, const TotalWeightReading &reading, const TargetConfig &target);
 
-  static TargetLedEvaluation evaluate(const ScaleSnapshot &snapshot, const TargetConfig &target);
+  static TotalWeightReading totalReading(const ScaleSnapshot &upper, const ScaleSnapshot &lower);
+  static TargetLedEvaluation evaluate(const TotalWeightReading &reading, const TargetConfig &target);
+  static const char *stateName(TargetLedState state);
 
  private:
-  static TargetLedEvaluation combine(const TargetLedEvaluation &upper, const TargetLedEvaluation &lower);
   void render(uint32_t nowMs, const TargetLedEvaluation &evaluation);
 
   uint32_t lastRenderMs_ = 0;

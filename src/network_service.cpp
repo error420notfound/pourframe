@@ -34,6 +34,25 @@ bool parseScale(const char *value, ScaleId &scale) {
   }
   return false;
 }
+
+bool parseTarget(const char *value, TargetId &target) {
+  if (value == nullptr) {
+    return false;
+  }
+  if (strcmp(value, "upper") == 0) {
+    target = TargetId::Upper;
+    return true;
+  }
+  if (strcmp(value, "lower") == 0) {
+    target = TargetId::Lower;
+    return true;
+  }
+  if (strcmp(value, "total") == 0) {
+    target = TargetId::Total;
+    return true;
+  }
+  return false;
+}
 }  // namespace
 
 NetworkService::NetworkService() : server_(80), webSocket_("/ws") {}
@@ -304,14 +323,18 @@ void NetworkService::handleWebSocketCommand(AsyncWebSocketClient *client, uint8_
 
   AppCommand command{};
   command.clientId = client->id();
-  if (!parseScale(channelName, command.scale)) {
-    sendClientError(client, requestId, "invalid_channel", "Channel must be upper or lower");
-    return;
-  }
   strlcpy(command.requestId, requestId, sizeof(command.requestId));
   if (strcmp(commandName, "tare") == 0) {
+    if (!parseScale(channelName, command.scale)) {
+      sendClientError(client, requestId, "invalid_channel", "Tare channel must be upper or lower");
+      return;
+    }
     command.type = CommandType::Tare;
   } else if (strcmp(commandName, "calibrate") == 0) {
+    if (!parseScale(channelName, command.scale)) {
+      sendClientError(client, requestId, "invalid_channel", "Calibration channel must be upper or lower");
+      return;
+    }
     command.type = CommandType::Calibrate;
     command.knownGrams = document["known_grams"] | 0.0f;
     if (!isfinite(command.knownGrams) || command.knownGrams <= 0.0f) {
@@ -319,6 +342,10 @@ void NetworkService::handleWebSocketCommand(AsyncWebSocketClient *client, uint8_
       return;
     }
   } else if (strcmp(commandName, "set_target") == 0) {
+    if (!parseTarget(channelName, command.target)) {
+      sendClientError(client, requestId, "invalid_channel", "Target channel must be upper, lower, or total");
+      return;
+    }
     command.type = CommandType::SetTarget;
     command.targetGrams = document["target_grams"] | 0.0f;
     if (!isfinite(command.targetGrams) || command.targetGrams <= 0.0f) {
@@ -326,6 +353,10 @@ void NetworkService::handleWebSocketCommand(AsyncWebSocketClient *client, uint8_
       return;
     }
   } else if (strcmp(commandName, "clear_target") == 0) {
+    if (!parseTarget(channelName, command.target)) {
+      sendClientError(client, requestId, "invalid_channel", "Target channel must be upper, lower, or total");
+      return;
+    }
     command.type = CommandType::ClearTarget;
   } else {
     sendClientError(client, requestId, "unknown_command",

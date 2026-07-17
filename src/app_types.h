@@ -7,6 +7,12 @@ enum class ScaleId : uint8_t {
   Lower,
 };
 
+enum class TargetId : uint8_t {
+  Upper,
+  Lower,
+  Total,
+};
+
 enum class CommandType : uint8_t {
   Tare,
   Calibrate,
@@ -18,6 +24,7 @@ enum class CommandType : uint8_t {
 struct AppCommand {
   CommandType type;
   ScaleId scale;
+  TargetId target;
   uint32_t clientId;
   char requestId[37];
   float knownGrams;
@@ -28,4 +35,11 @@ struct AppCommand {
 
 inline const char *scaleIdName(ScaleId scale) {
   return scale == ScaleId::Upper ? "upper" : "lower";
+}
+
+inline const char *targetIdName(TargetId target) {
+  if (target == TargetId::Total) {
+    return "total";
+  }
+  return target == TargetId::Upper ? "upper" : "lower";
 }

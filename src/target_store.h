@@ -18,17 +18,18 @@ struct TargetConfig {
 class TargetStore {
  public:
   void begin(Preferences &preferences);
-  bool setTarget(ScaleId scale, float grams);
-  void clearTarget(ScaleId scale);
-  const TargetConfig &config(ScaleId scale) const;
+  bool setTarget(TargetId target, float grams);
+  void clearTarget(TargetId target);
+  const TargetConfig &config(TargetId target) const;
 
  private:
-  TargetConfig &mutableConfig(ScaleId scale);
-  void load(ScaleId scale);
-  void persist(ScaleId scale);
-  const char *keyFor(ScaleId scale, const char *upperKey, const char *lowerKey) const;
+  TargetConfig &mutableConfig(TargetId target);
+  void load(TargetId target);
+  void persist(TargetId target);
+  const char *keyFor(TargetId target, const char *upperKey, const char *lowerKey, const char *totalKey) const;
 
   Preferences *preferences_ = nullptr;
   TargetConfig upper_{};
   TargetConfig lower_{};
+  TargetConfig total_{};
 };

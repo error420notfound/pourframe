@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DeviceCommand, DeviceTelemetry, ProtocolAck, ProtocolError, ProtocolMessage, ScaleId } from './types'
+import type {
+  DeviceCommand,
+  DeviceTelemetry,
+  LedState,
+  ProtocolAck,
+  ProtocolError,
+  ProtocolMessage,
+  ScaleId,
+  ScaleTelemetry,
+  TargetId,
+  TotalTelemetry,
+} from './types'
 
 type ConnectionState = 'connecting' | 'online' | 'offline'
 
@@ -10,6 +21,49 @@ interface PendingCommand {
 }
 
 const mockMode = import.meta.env.DEV && !import.meta.env.VITE_DEVICE_HOST
+const targetToleranceGrams = 0.2
+const approachFraction = 0.9
+
+function usableScale(scale: ScaleTelemetry) {
+  return scale.available && scale.ready && !scale.stale && !scale.disconnected && !scale.calibrating && Number.isFinite(scale.grams)
+}
+
+function evaluateTarget(grams: number | null, targetGrams: number | null | undefined) {
+  let led_state: LedState = 'normal'
+  let led_proximity = 0
+  if (grams == null || targetGrams == null) return { led_state, led_proximity }
+
+  const difference = grams - targetGrams
+  if (difference > targetToleranceGrams) return { led_state: 'overweight' as const, led_proximity: 1 }
+  if (Math.abs(difference) <= targetToleranceGrams) return { led_state: 'at_target' as const, led_proximity: 1 }
+
+  const approachStart = targetGrams * approachFraction
+  const approachEnd = targetGrams - targetToleranceGrams
+  if (grams >= approachStart && grams < approachEnd) {
+    const window = approachEnd - approachStart
+    led_state = 'approaching'
+    led_proximity = window > 0 ? Math.min(1, Math.max(0, (grams - approachStart) / window)) : 1
+  }
+  return { led_state, led_proximity }
+}
+
+function deriveTotal(scales: Record<ScaleId, ScaleTelemetry>, target: Pick<TotalTelemetry, 'target_grams' | 'target_history_grams'>): TotalTelemetry {
+  const upperIncluded = usableScale(scales.upper)
+  const lowerIncluded = usableScale(scales.lower)
+  const available = upperIncluded || lowerIncluded
+  const grams = available
+    ? Math.round(((upperIncluded ? scales.upper.grams : 0) + (lowerIncluded ? scales.lower.grams : 0)) * 100) / 100
+    : null
+  return {
+    grams,
+    available,
+    partial: upperIncluded !== lowerIncluded,
+    upper_included: upperIncluded,
+    lower_included: lowerIncluded,
+    ...target,
+    ...evaluateTarget(grams, target.target_grams),
+  }
+}
 
 const initialTelemetry: DeviceTelemetry = {
   v: 1,
@@ -18,6 +72,17 @@ const initialTelemetry: DeviceTelemetry = {
   uptime_ms: 120_000,
   hostname: 'pourframe.local',
   wifi: { connected: true, provisioning: false, ssid: 'Local Wi-Fi', rssi: -51, ip: '192.168.1.42' },
+  total: {
+    grams: 265.2,
+    available: true,
+    partial: false,
+    upper_included: true,
+    lower_included: true,
+    target_grams: 270,
+    target_history_grams: [270, 300, 250],
+    led_state: 'approaching',
+    led_proximity: 0.81,
+  },
   scales: {
     upper: {
       raw: 128_442,
@@ -78,22 +143,24 @@ export function useDevice() {
       const seconds = (Date.now() - startedAt) / 1000
       setTelemetry((current) => {
         if (!current) return initialTelemetry
+        const scales = {
+          upper: {
+            ...current.scales.upper,
+            raw: Math.round(128_442 + Math.sin(seconds * 3) * 8),
+            grams: Math.round((current.scales.upper.grams + Math.sin(seconds * 2.5) * 0.02) * 100) / 100,
+          },
+          lower: {
+            ...current.scales.lower,
+            raw: Math.round(892_031 + Math.sin(seconds * 2.2) * 6),
+            grams: Math.round((current.scales.lower.grams + Math.sin(seconds * 1.8) * 0.01) * 100) / 100,
+          },
+        }
         return {
           ...current,
           seq: current.seq + 1,
           uptime_ms: current.uptime_ms + 200,
-          scales: {
-            upper: {
-              ...current.scales.upper,
-              raw: Math.round(128_442 + Math.sin(seconds * 3) * 8),
-              grams: Math.round((current.scales.upper.grams + Math.sin(seconds * 2.5) * 0.02) * 100) / 100,
-            },
-            lower: {
-              ...current.scales.lower,
-              raw: Math.round(892_031 + Math.sin(seconds * 2.2) * 6),
-              grams: Math.round((current.scales.lower.grams + Math.sin(seconds * 1.8) * 0.01) * 100) / 100,
-            },
-          },
+          scales,
+          total: deriveTotal(scales, current.total),
         }
       })
       setLastUpdateAt(Date.now())
@@ -168,15 +235,17 @@ export function useDevice() {
     }
   }, [])
 
-  const sendCommand = useCallback((command: DeviceCommand, channel: ScaleId, grams?: number) => {
+  const sendCommand = useCallback((command: DeviceCommand, channel: TargetId, grams?: number) => {
     if (mockMode) {
       if (command === 'tare') {
-        setTelemetry((current) =>
-          current
-            ? { ...current, scales: { ...current.scales, [channel]: { ...current.scales[channel], grams: 0 } } }
-            : current,
-        )
+        if (channel === 'total') return Promise.reject(new Error('Total weight cannot be tared directly'))
+        setTelemetry((current) => {
+          if (!current) return current
+          const scales = { ...current.scales, [channel]: { ...current.scales[channel], grams: 0 } }
+          return { ...current, scales, total: deriveTotal(scales, current.total) }
+        })
       } else if (command === 'calibrate') {
+        if (channel === 'total') return Promise.reject(new Error('Total weight cannot be calibrated directly'))
         setTelemetry((current) =>
           current
             ? {
@@ -200,6 +269,13 @@ export function useDevice() {
         const rounded = Math.round(grams * 10) / 10
         setTelemetry((current) => {
           if (!current) return current
+          if (channel === 'total') {
+            const history = [rounded, ...(current.total.target_history_grams ?? []).filter((value) => value !== rounded)].slice(0, 5)
+            return {
+              ...current,
+              total: deriveTotal(current.scales, { target_grams: rounded, target_history_grams: history }),
+            }
+          }
           const scale = current.scales[channel]
           const history = [rounded, ...(scale.target_history_grams ?? []).filter((value) => value !== rounded)].slice(0, 5)
           return {
@@ -211,17 +287,22 @@ export function useDevice() {
           }
         })
       } else if (command === 'clear_target') {
-        setTelemetry((current) =>
-          current
-            ? {
-                ...current,
-                scales: {
-                  ...current.scales,
-                  [channel]: { ...current.scales[channel], target_grams: null },
-                },
-              }
-            : current,
-        )
+        setTelemetry((current) => {
+          if (!current) return current
+          if (channel === 'total') {
+            return {
+              ...current,
+              total: deriveTotal(current.scales, { ...current.total, target_grams: null }),
+            }
+          }
+          return {
+            ...current,
+            scales: {
+              ...current.scales,
+              [channel]: { ...current.scales[channel], target_grams: null },
+            },
+          }
+        })
       }
       return Promise.resolve({ v: 1, type: 'ack', id: 'mock', ok: true, message: 'Accepted' } as ProtocolAck)
     }

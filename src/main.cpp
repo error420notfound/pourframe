@@ -53,13 +53,13 @@ void processCommands() {
     }
 
     if (command.type == CommandType::SetTarget) {
-      const bool accepted = targetStore.setTarget(command.scale, command.targetGrams);
+      const bool accepted = targetStore.setTarget(command.target, command.targetGrams);
       network.sendAck(command.clientId, command.requestId, accepted,
                       accepted ? "Target weight saved" : "Invalid target weight");
       continue;
     }
     if (command.type == CommandType::ClearTarget) {
-      targetStore.clearTarget(command.scale);
+      targetStore.clearTarget(command.target);
       network.sendAck(command.clientId, command.requestId, true, "Target weight cleared");
       continue;
     }
@@ -88,15 +88,7 @@ void processCalibrationResult(ScaleChannel &channel, const char *preferenceKey) 
   network.sendCalibrationEvent(channel.id(), succeeded, factor);
 }
 
-void addScaleTelemetry(JsonObject object, const ScaleSnapshot &snapshot, const TargetConfig &target) {
-  object["raw"] = snapshot.raw;
-  object["grams"] = roundf(snapshot.grams * 100.0f) / 100.0f;
-  object["available"] = snapshot.available;
-  object["ready"] = snapshot.ready;
-  object["stale"] = snapshot.stale;
-  object["disconnected"] = snapshot.disconnected;
-  object["calibrating"] = snapshot.calibrating;
-  object["last_sample_ms"] = snapshot.lastSampleMs;
+void addTargetTelemetry(JsonObject object, const TargetConfig &target) {
   if (target.enabled && target.historyCount > 0) {
     object["target_grams"] = target.activeGrams();
   } else {
@@ -108,16 +100,48 @@ void addScaleTelemetry(JsonObject object, const ScaleSnapshot &snapshot, const T
   }
 }
 
+void addScaleTelemetry(JsonObject object, const ScaleSnapshot &snapshot, const TargetConfig &target) {
+  object["raw"] = snapshot.raw;
+  object["grams"] = roundf(snapshot.grams * 100.0f) / 100.0f;
+  object["available"] = snapshot.available;
+  object["ready"] = snapshot.ready;
+  object["stale"] = snapshot.stale;
+  object["disconnected"] = snapshot.disconnected;
+  object["calibrating"] = snapshot.calibrating;
+  object["last_sample_ms"] = snapshot.lastSampleMs;
+  addTargetTelemetry(object, target);
+}
+
+void addTotalTelemetry(JsonObject object, const TotalWeightReading &reading, const TargetConfig &target) {
+  if (reading.available) {
+    object["grams"] = roundf(reading.grams * 100.0f) / 100.0f;
+  } else {
+    object["grams"] = nullptr;
+  }
+  object["available"] = reading.available;
+  object["partial"] = reading.partial;
+  object["upper_included"] = reading.upperIncluded;
+  object["lower_included"] = reading.lowerIncluded;
+  addTargetTelemetry(object, target);
+  const TargetLedEvaluation evaluation = StatusLed::evaluate(reading, target);
+  object["led_state"] = StatusLed::stateName(evaluation.state);
+  object["led_proximity"] = roundf(evaluation.proximity * 1000.0f) / 1000.0f;
+}
+
 void publishTelemetry(uint32_t nowMs) {
   JsonDocument document;
   document["v"] = POURFRAME_PROTOCOL_VERSION;
   document["type"] = "telemetry";
   document["seq"] = telemetrySequence++;
   document["uptime_ms"] = nowMs;
-  addScaleTelemetry(document["scales"]["upper"].to<JsonObject>(), upperScale.snapshot(nowMs),
-                    targetStore.config(ScaleId::Upper));
-  addScaleTelemetry(document["scales"]["lower"].to<JsonObject>(), lowerScale.snapshot(nowMs),
-                    targetStore.config(ScaleId::Lower));
+  const ScaleSnapshot upperSnapshot = upperScale.snapshot(nowMs);
+  const ScaleSnapshot lowerSnapshot = lowerScale.snapshot(nowMs);
+  const TotalWeightReading totalReading = StatusLed::totalReading(upperSnapshot, lowerSnapshot);
+  addScaleTelemetry(document["scales"]["upper"].to<JsonObject>(), upperSnapshot,
+                    targetStore.config(TargetId::Upper));
+  addScaleTelemetry(document["scales"]["lower"].to<JsonObject>(), lowerSnapshot,
+                    targetStore.config(TargetId::Lower));
+  addTotalTelemetry(document["total"].to<JsonObject>(), totalReading, targetStore.config(TargetId::Total));
   document["wifi"]["connected"] = network.connected();
   document["wifi"]["provisioning"] = network.accessPointActive();
   document["wifi"]["ssid"] = network.stationSsid();
@@ -125,7 +149,7 @@ void publishTelemetry(uint32_t nowMs) {
   document["wifi"]["ip"] = network.ipAddress();
   document["hostname"] = "pourframe.local";
 
-  char output[1024];
+  char output[1536];
   const size_t written = serializeJson(document, output, sizeof(output));
   if (written > 0 && written < sizeof(output)) {
     network.broadcastTelemetry(output, written, nowMs);
@@ -175,8 +199,9 @@ void loop() {
   processCommands();
   processCalibrationResult(upperScale, "upper_factor");
   processCalibrationResult(lowerScale, "lower_factor");
-  statusLed.update(nowMs, upperScale.snapshot(nowMs), targetStore.config(ScaleId::Upper), lowerScale.snapshot(nowMs),
-                   targetStore.config(ScaleId::Lower));
+  const TotalWeightReading totalReading =
+      StatusLed::totalReading(upperScale.snapshot(nowMs), lowerScale.snapshot(nowMs));
+  statusLed.update(nowMs, totalReading, targetStore.config(TargetId::Total));
   network.loop(nowMs);
 
   if (nowMs - lastTelemetryMs >= kTelemetryIntervalMs) {

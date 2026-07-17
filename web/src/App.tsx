@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
-import type { ScaleId, ScaleTelemetry } from './types'
+import type { ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
 import { useDevice } from './useDevice'
 
 interface ScalePanelProps {
@@ -9,8 +9,6 @@ interface ScalePanelProps {
   scale: ScaleTelemetry | null
   onTare: (id: ScaleId) => Promise<void>
   onCalibrate: (id: ScaleId) => void
-  onSetTarget: (id: ScaleId, grams: number) => Promise<void>
-  onClearTarget: (id: ScaleId) => Promise<void>
 }
 
 function TickRail() {
@@ -34,29 +32,24 @@ function SignalLine({ active }: { active: boolean }) {
   )
 }
 
-function ScalePanel({ id, label, scale, onTare, onCalibrate, onSetTarget, onClearTarget }: ScalePanelProps) {
+interface TargetControlProps {
+  id: TargetId
+  label: string
+  targetGrams?: number | null
+  history?: number[]
+  primary?: boolean
+  onSetTarget: (id: TargetId, grams: number) => Promise<void>
+  onClearTarget: (id: TargetId) => Promise<void>
+}
+
+function TargetControl({ id, label, targetGrams, history, primary = false, onSetTarget, onClearTarget }: TargetControlProps) {
   const [actionMessage, setActionMessage] = useState('')
-  const [targetInput, setTargetInput] = useState(() => scale?.target_grams?.toFixed(1) ?? '')
+  const [targetInput, setTargetInput] = useState(() => targetGrams?.toFixed(1) ?? '')
   const [targetSaving, setTargetSaving] = useState(false)
-  const unavailable = !scale || scale.disconnected
-  const ready = Boolean(scale?.ready && !scale.stale)
-  const normalizedGrams = scale && Math.abs(scale.grams) < 0.05 ? 0 : scale?.grams
-  const weight = unavailable ? '—' : normalizedGrams?.toFixed(1) ?? '—'
-  const raw = scale?.available === false || !scale ? 'Unavailable' : scale.raw.toLocaleString('en-US')
 
   useEffect(() => {
-    setTargetInput(scale?.target_grams?.toFixed(1) ?? '')
-  }, [scale?.target_grams])
-
-  const tare = async () => {
-    setActionMessage('Taring…')
-    try {
-      await onTare(id)
-      setActionMessage('Tared')
-    } catch (error) {
-      setActionMessage(error instanceof Error ? error.message : 'Tare failed')
-    }
-  }
+    setTargetInput(targetGrams?.toFixed(1) ?? '')
+  }, [targetGrams])
 
   const saveTarget = async (event: FormEvent) => {
     event.preventDefault()
@@ -105,6 +98,72 @@ function ScalePanel({ id, label, scale, onTare, onCalibrate, onSetTarget, onClea
   }
 
   return (
+    <form className={primary ? 'target-control target-control--primary' : 'target-control'} onSubmit={saveTarget}>
+      <div className="target-control__heading">
+        <label htmlFor={`${id}-target`}>{label}</label>
+        <span>{targetGrams == null ? 'Not set' : `${targetGrams.toFixed(1)} g active`}</span>
+      </div>
+      <div className="target-control__entry">
+        <div className="target-control__input">
+          <input
+            id={`${id}-target`}
+            inputMode="decimal"
+            min="0.1"
+            onChange={(event) => setTargetInput(event.target.value)}
+            placeholder="0.0"
+            step="0.1"
+            type="number"
+            value={targetInput}
+          />
+          <span>g</span>
+        </div>
+        <button className="target-button target-button--save" disabled={targetSaving} type="submit">
+          {targetSaving ? 'Saving…' : 'Save'}
+        </button>
+        <button className="target-button" disabled={targetSaving || targetGrams == null} onClick={clearTarget} type="button">
+          Clear
+        </button>
+      </div>
+      {history?.length ? (
+        <div className="target-history" aria-label={`Recent ${label.toLowerCase()} values`}>
+          <span>Recent</span>
+          {history.map((grams) => (
+            <button
+              className={targetGrams === grams ? 'target-chip target-chip--active' : 'target-chip'}
+              disabled={targetSaving}
+              key={grams}
+              onClick={() => selectRecentTarget(grams)}
+              type="button"
+            >
+              {grams.toFixed(1)} g
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <p className="target-message" role="status">{actionMessage}</p>
+    </form>
+  )
+}
+
+function ScalePanel({ id, label, scale, onTare, onCalibrate }: ScalePanelProps) {
+  const [actionMessage, setActionMessage] = useState('')
+  const unavailable = !scale || scale.disconnected
+  const ready = Boolean(scale?.ready && !scale.stale)
+  const normalizedGrams = scale && Math.abs(scale.grams) < 0.05 ? 0 : scale?.grams
+  const weight = unavailable ? '—' : normalizedGrams?.toFixed(1) ?? '—'
+  const raw = scale?.available === false || !scale ? 'Unavailable' : scale.raw.toLocaleString('en-US')
+
+  const tare = async () => {
+    setActionMessage('Taring…')
+    try {
+      await onTare(id)
+      setActionMessage('Tared')
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Tare failed')
+    }
+  }
+
+  return (
     <section className="scale-panel" aria-labelledby={`${id}-heading`}>
       <TickRail />
       <div className="scale-panel__content">
@@ -117,54 +176,6 @@ function ScalePanel({ id, label, scale, onTare, onCalibrate, onSetTarget, onClea
         <p className="raw-reading">
           <span>Raw</span> {raw}
         </p>
-        <form className="target-control" onSubmit={saveTarget}>
-          <div className="target-control__heading">
-            <label htmlFor={`${id}-target`}>Target weight</label>
-            <span>{scale?.target_grams == null ? 'Not set' : `${scale.target_grams.toFixed(1)} g active`}</span>
-          </div>
-          <div className="target-control__entry">
-            <div className="target-control__input">
-              <input
-                id={`${id}-target`}
-                inputMode="decimal"
-                min="0.1"
-                onChange={(event) => setTargetInput(event.target.value)}
-                placeholder="0.0"
-                step="0.1"
-                type="number"
-                value={targetInput}
-              />
-              <span>g</span>
-            </div>
-            <button className="target-button target-button--save" disabled={targetSaving} type="submit">
-              {targetSaving ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              className="target-button"
-              disabled={targetSaving || scale?.target_grams == null}
-              onClick={clearTarget}
-              type="button"
-            >
-              Clear
-            </button>
-          </div>
-          {scale?.target_history_grams?.length ? (
-            <div className="target-history" aria-label="Recent target weights">
-              <span>Recent</span>
-              {scale.target_history_grams.map((grams) => (
-                <button
-                  className={scale.target_grams === grams ? 'target-chip target-chip--active' : 'target-chip'}
-                  disabled={targetSaving}
-                  key={grams}
-                  onClick={() => selectRecentTarget(grams)}
-                  type="button"
-                >
-                  {grams.toFixed(1)} g
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </form>
         <div className="scale-actions">
           <button className="button button--primary" disabled={unavailable || scale?.calibrating} onClick={tare}>
             Tare
@@ -175,6 +186,124 @@ function ScalePanel({ id, label, scale, onTare, onCalibrate, onSetTarget, onClea
         </div>
         <p className="action-message" role="status">{actionMessage}</p>
       </div>
+    </section>
+  )
+}
+
+interface TotalWeightSectionProps {
+  total: TotalTelemetry | null
+  upper: ScaleTelemetry | null
+  lower: ScaleTelemetry | null
+  onSetTarget: (id: TargetId, grams: number) => Promise<void>
+  onClearTarget: (id: TargetId) => Promise<void>
+}
+
+function TotalWeightSection({ total, upper, lower, onSetTarget, onClearTarget }: TotalWeightSectionProps) {
+  const targetGrams = total?.target_grams
+  const liveGrams = total?.grams
+  const hasReading = Boolean(total?.available && liveGrams != null)
+  const hasProgress = hasReading && targetGrams != null
+  const normalizedGrams = liveGrams != null && Math.abs(liveGrams) < 0.05 ? 0 : liveGrams
+  const percentage = hasProgress ? Math.min(100, Math.max(0, (normalizedGrams! / targetGrams) * 100)) : 0
+  const approachDuration = 1000 - Math.min(1, Math.max(0, total?.led_proximity ?? 0)) * 800
+  const progressStyle = {
+    '--progress': `${percentage}%`,
+    '--approach-duration': `${approachDuration}ms`,
+  } as CSSProperties
+  const sourceLabel = !total?.available
+    ? 'No usable load cells'
+    : total.partial
+      ? total.upper_included
+        ? 'Partial · Upper only'
+        : 'Partial · Lower only'
+      : 'Upper + lower load cells'
+  const progressLabel = !targetGrams
+    ? 'Set a total target to track progress'
+    : !hasReading
+      ? 'Waiting for a usable reading'
+      : `${percentage.toFixed(0)}% of ${targetGrams.toFixed(1)} g target`
+  const state = total?.led_state ?? 'normal'
+  const stateLabel = !targetGrams
+    ? 'No target set'
+    : !hasReading
+      ? 'Waiting for reading'
+      : state === 'at_target'
+        ? 'At target'
+        : state === 'overweight'
+          ? 'Overweight'
+          : state === 'approaching'
+            ? 'Approaching target'
+            : 'Below target'
+
+  return (
+    <section className="total-weight" aria-labelledby="total-weight-heading">
+      <div className="total-weight__summary" style={progressStyle}>
+        <div className="total-weight__heading">
+          <div>
+            <p className="eyebrow">Combined measurement</p>
+            <h2 id="total-weight-heading">Total Weight</h2>
+          </div>
+          <span className={total?.partial ? 'total-source total-source--partial' : 'total-source'}>{sourceLabel}</span>
+        </div>
+        <div className={hasReading ? 'total-weight__value' : 'total-weight__value total-weight__value--unavailable'} aria-live="polite">
+          <span>{hasReading ? normalizedGrams!.toFixed(1) : '—'}</span>
+          {hasReading ? <small>g</small> : null}
+        </div>
+        <div className="progress-copy">
+          <span>{progressLabel}</span>
+          {hasProgress ? <strong>{normalizedGrams!.toFixed(1)} / {targetGrams.toFixed(1)} g</strong> : null}
+        </div>
+        <div
+          aria-label="Total weight progress"
+          aria-valuemax={hasProgress ? targetGrams : undefined}
+          aria-valuemin={hasProgress ? 0 : undefined}
+          aria-valuenow={hasProgress ? Math.min(targetGrams, Math.max(0, normalizedGrams!)) : undefined}
+          aria-valuetext={hasProgress ? progressLabel : undefined}
+          className="total-progress"
+          role={hasProgress ? 'progressbar' : undefined}
+        >
+          <span className={`total-progress__fill total-progress__fill--${state}`} />
+        </div>
+        <div className="led-legend" aria-label={`LED state: ${stateLabel}`}>
+          <i className={`led-legend__dot led-legend__dot--${state}`} />
+          <span>{stateLabel}</span>
+        </div>
+      </div>
+
+      <div className="total-weight__controls">
+        <TargetControl
+          history={total?.target_history_grams}
+          id="total"
+          label="Total target weight"
+          onClearTarget={onClearTarget}
+          onSetTarget={onSetTarget}
+          primary
+          targetGrams={targetGrams}
+        />
+      </div>
+
+      <details className="advanced-targets">
+        <summary>Advanced per-scale targets</summary>
+        <p>Legacy targets remain available for compatible clients. They do not control the total progress indicator or status LED.</p>
+        <div className="advanced-targets__grid">
+          <TargetControl
+            history={upper?.target_history_grams}
+            id="upper"
+            label="Upper target"
+            onClearTarget={onClearTarget}
+            onSetTarget={onSetTarget}
+            targetGrams={upper?.target_grams}
+          />
+          <TargetControl
+            history={lower?.target_history_grams}
+            id="lower"
+            label="Lower target"
+            onClearTarget={onClearTarget}
+            onSetTarget={onSetTarget}
+            targetGrams={lower?.target_grams}
+          />
+        </div>
+      </details>
     </section>
   )
 }
@@ -345,12 +474,13 @@ function App() {
   const tare = (channel: ScaleId) => sendCommand('tare', channel).then(() => undefined)
   const calibrate = (channel: ScaleId, knownGrams: number) =>
     sendCommand('calibrate', channel, knownGrams).then(() => undefined)
-  const setTarget = (channel: ScaleId, targetGrams: number) =>
+  const setTarget = (channel: TargetId, targetGrams: number) =>
     sendCommand('set_target', channel, targetGrams).then(() => undefined)
-  const clearTarget = (channel: ScaleId) => sendCommand('clear_target', channel).then(() => undefined)
+  const clearTarget = (channel: TargetId) => sendCommand('clear_target', channel).then(() => undefined)
 
   const upper = telemetry?.scales.upper ?? null
   const lower = telemetry?.scales.lower ?? null
+  const total = telemetry?.total ?? null
   const wifiConnected = Boolean(telemetry?.wifi.connected)
 
   return (
@@ -368,13 +498,19 @@ function App() {
         </div>
       </header>
 
+      <TotalWeightSection
+        lower={lower}
+        onClearTarget={clearTarget}
+        onSetTarget={setTarget}
+        total={total}
+        upper={upper}
+      />
+
       <div className="scale-grid">
         <ScalePanel
           id="upper"
           label="Upper / Dripper"
           onCalibrate={setCalibrationChannel}
-          onClearTarget={clearTarget}
-          onSetTarget={setTarget}
           onTare={tare}
           scale={upper}
         />
@@ -382,8 +518,6 @@ function App() {
           id="lower"
           label="Lower / Carafe"
           onCalibrate={setCalibrationChannel}
-          onClearTarget={clearTarget}
-          onSetTarget={setTarget}
           onTare={tare}
           scale={lower}
         />
