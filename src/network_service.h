@@ -12,6 +12,8 @@
 
 class NetworkService {
  public:
+  static constexpr size_t kMaxOutputPayload = 2048;
+
   NetworkService();
 
   void begin(QueueHandle_t commandQueue);
@@ -30,7 +32,6 @@ class NetworkService {
 
  private:
   static constexpr size_t kMaxCommandPayload = 512;
-  static constexpr size_t kMaxOutputPayload = 1024;
   static constexpr uint8_t kMaxWebSocketClients = 4;
   static constexpr uint32_t kConnectTimeoutMs = 15000;
   static constexpr uint32_t kMaxReconnectDelayMs = 30000;

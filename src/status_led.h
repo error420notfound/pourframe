@@ -2,7 +2,8 @@
 
 #include <Arduino.h>
 
-#include "scale_channel.h"
+#include <measurement_types.h>
+
 #include "target_store.h"
 
 enum class TargetLedState : uint8_t {
@@ -33,7 +34,7 @@ class StatusLed {
   void begin();
   void update(uint32_t nowMs, const TotalWeightReading &reading, const TargetConfig &target);
 
-  static TotalWeightReading totalReading(const ScaleSnapshot &upper, const ScaleSnapshot &lower);
+  static TotalWeightReading totalReading(const measurement::MeasurementSnapshot &snapshot);
   static TargetLedEvaluation evaluate(const TotalWeightReading &reading, const TargetConfig &target);
   static const char *stateName(TargetLedState state);
 

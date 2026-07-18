@@ -19,9 +19,9 @@ constexpr uint32_t kPurplePulseOnMs = 150;
 
 CRGB statusPixels[kLedCount];
 
-bool usableReading(const ScaleSnapshot &snapshot) {
-  return snapshot.available && snapshot.ready && !snapshot.stale && !snapshot.disconnected &&
-         !snapshot.calibrating && isfinite(snapshot.grams);
+bool usableReading(const measurement::ChannelHealth &health, double grams) {
+  return health.available && health.ready && !health.stale && !health.disconnected && !health.calibrating &&
+         health.calibrated && isfinite(grams);
 }
 
 CRGB scaledColor(const CRGB &color, uint8_t scale) {
@@ -46,15 +46,15 @@ void StatusLed::update(uint32_t nowMs, const TotalWeightReading &reading, const 
   render(nowMs, evaluate(reading, target));
 }
 
-TotalWeightReading StatusLed::totalReading(const ScaleSnapshot &upper, const ScaleSnapshot &lower) {
+TotalWeightReading StatusLed::totalReading(const measurement::MeasurementSnapshot &snapshot) {
   TotalWeightReading reading{};
-  reading.upperIncluded = usableReading(upper);
-  reading.lowerIncluded = usableReading(lower);
+  reading.upperIncluded = usableReading(snapshot.upperHealth, snapshot.upperFiltered);
+  reading.lowerIncluded = usableReading(snapshot.lowerHealth, snapshot.lowerFiltered);
   if (reading.upperIncluded) {
-    reading.grams += upper.grams;
+    reading.grams += static_cast<float>(snapshot.upperFiltered);
   }
   if (reading.lowerIncluded) {
-    reading.grams += lower.grams;
+    reading.grams += static_cast<float>(snapshot.lowerFiltered);
   }
   reading.available = reading.upperIncluded || reading.lowerIncluded;
   reading.partial = reading.upperIncluded != reading.lowerIncluded;

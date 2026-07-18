@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
-import type { ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
+import type { MeasurementTelemetry, ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
 import { useDevice } from './useDevice'
 
 interface ScalePanelProps {
   id: ScaleId
   label: string
   scale: ScaleTelemetry | null
+  measurement: MeasurementTelemetry | null
   onTare: (id: ScaleId) => Promise<void>
   onCalibrate: (id: ScaleId) => void
 }
@@ -21,13 +22,20 @@ function TickRail() {
   )
 }
 
-function SignalLine({ active }: { active: boolean }) {
+function formatWeight(value: number) {
+  const rounded = Math.round(value * 10) / 10
+  return (Object.is(rounded, -0) ? 0 : rounded).toFixed(1)
+}
+
+function MeasurementLine({ measurement, fault }: { measurement: MeasurementTelemetry | null; fault: boolean }) {
+  const state = fault ? 'DISTURBED_OR_UNCERTAIN' : measurement?.state ?? 'DISTURBED_OR_UNCERTAIN'
+  const label = state === 'DISTURBED_OR_UNCERTAIN' ? 'Uncertain' : state.charAt(0) + state.slice(1).toLowerCase()
   return (
-    <div className={active ? 'signal signal--active' : 'signal'} aria-hidden="true">
+    <div className={`measurement-line measurement-line--${state.toLowerCase()}`}>
       <svg viewBox="0 0 500 20" preserveAspectRatio="none">
         <path d="M1 10h255l7-3 9 6 8-5 9 4 8-6 8 7 8-5 8 4 8-7 8 7 9-4 8 2 8-5 9 7 8-6 9 8 7-5 9 2 8-6 8 8 8-4 8 3 8-5 8 5h25" />
       </svg>
-      <span />
+      <span>{label}</span>
     </div>
   )
 }
@@ -145,12 +153,10 @@ function TargetControl({ id, label, targetGrams, history, primary = false, onSet
   )
 }
 
-function ScalePanel({ id, label, scale, onTare, onCalibrate }: ScalePanelProps) {
+function ScalePanel({ id, label, scale, measurement, onTare, onCalibrate }: ScalePanelProps) {
   const [actionMessage, setActionMessage] = useState('')
-  const unavailable = !scale || scale.disconnected
-  const ready = Boolean(scale?.ready && !scale.stale)
-  const normalizedGrams = scale && Math.abs(scale.grams) < 0.05 ? 0 : scale?.grams
-  const weight = unavailable ? '—' : normalizedGrams?.toFixed(1) ?? '—'
+  const unavailable = !scale || scale.disconnected || !scale.calibration_valid
+  const weight = unavailable ? '—' : formatWeight(scale.grams)
   const raw = scale?.available === false || !scale ? 'Unavailable' : scale.raw.toLocaleString('en-US')
 
   const tare = async () => {
@@ -172,7 +178,7 @@ function ScalePanel({ id, label, scale, onTare, onCalibrate }: ScalePanelProps) 
           <span>{weight}</span>
           {!unavailable ? <small>g</small> : null}
         </div>
-        <SignalLine active={ready} />
+        <MeasurementLine measurement={measurement} fault={unavailable || Boolean(scale?.stale || scale?.saturated)} />
         <p className="raw-reading">
           <span>Raw</span> {raw}
         </p>
@@ -194,17 +200,17 @@ interface TotalWeightSectionProps {
   total: TotalTelemetry | null
   upper: ScaleTelemetry | null
   lower: ScaleTelemetry | null
+  measurement: MeasurementTelemetry | null
   onSetTarget: (id: TargetId, grams: number) => Promise<void>
   onClearTarget: (id: TargetId) => Promise<void>
 }
 
-function TotalWeightSection({ total, upper, lower, onSetTarget, onClearTarget }: TotalWeightSectionProps) {
+function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onClearTarget }: TotalWeightSectionProps) {
   const targetGrams = total?.target_grams
   const liveGrams = total?.grams
   const hasReading = Boolean(total?.available && liveGrams != null)
   const hasProgress = hasReading && targetGrams != null
-  const normalizedGrams = liveGrams != null && Math.abs(liveGrams) < 0.05 ? 0 : liveGrams
-  const percentage = hasProgress ? Math.min(100, Math.max(0, (normalizedGrams! / targetGrams) * 100)) : 0
+  const percentage = hasProgress ? Math.min(100, Math.max(0, (liveGrams! / targetGrams) * 100)) : 0
   const approachDuration = 1000 - Math.min(1, Math.max(0, total?.led_proximity ?? 0)) * 800
   const progressStyle = {
     '--progress': `${percentage}%`,
@@ -246,18 +252,18 @@ function TotalWeightSection({ total, upper, lower, onSetTarget, onClearTarget }:
           <span className={total?.partial ? 'total-source total-source--partial' : 'total-source'}>{sourceLabel}</span>
         </div>
         <div className={hasReading ? 'total-weight__value' : 'total-weight__value total-weight__value--unavailable'} aria-live="polite">
-          <span>{hasReading ? normalizedGrams!.toFixed(1) : '—'}</span>
+          <span>{hasReading ? formatWeight(liveGrams!) : '—'}</span>
           {hasReading ? <small>g</small> : null}
         </div>
         <div className="progress-copy">
           <span>{progressLabel}</span>
-          {hasProgress ? <strong>{normalizedGrams!.toFixed(1)} / {targetGrams.toFixed(1)} g</strong> : null}
+          {hasProgress ? <strong>{formatWeight(liveGrams!)} / {targetGrams.toFixed(1)} g</strong> : null}
         </div>
         <div
           aria-label="Total weight progress"
           aria-valuemax={hasProgress ? targetGrams : undefined}
           aria-valuemin={hasProgress ? 0 : undefined}
-          aria-valuenow={hasProgress ? Math.min(targetGrams, Math.max(0, normalizedGrams!)) : undefined}
+          aria-valuenow={hasProgress ? Math.min(targetGrams, Math.max(0, liveGrams!)) : undefined}
           aria-valuetext={hasProgress ? progressLabel : undefined}
           className="total-progress"
           role={hasProgress ? 'progressbar' : undefined}
@@ -267,6 +273,10 @@ function TotalWeightSection({ total, upper, lower, onSetTarget, onClearTarget }:
         <div className="led-legend" aria-label={`LED state: ${stateLabel}`}>
           <i className={`led-legend__dot led-legend__dot--${state}`} />
           <span>{stateLabel}</span>
+        </div>
+        <div className={`measurement-summary measurement-summary--${(measurement?.state ?? 'DISTURBED_OR_UNCERTAIN').toLowerCase()}`}>
+          <strong>{measurement?.state === 'DISTURBED_OR_UNCERTAIN' ? 'Uncertain' : measurement?.state ?? 'Waiting'}</strong>
+          <span>{measurement ? `${Math.round(measurement.confidence * 100)}% confidence${measurement.is_stable ? ' · stable' : ''}` : 'No measurement state'}</span>
         </div>
       </div>
 
@@ -374,7 +384,7 @@ function CalibrationModal({ channel, onClose, onSubmit }: CalibrationModalProps)
   return (
     <Modal title={`Calibrate ${channel === 'upper' ? 'Upper / Dripper' : 'Lower / Carafe'}`} onClose={onClose}>
       <form className="modal-form" onSubmit={submit}>
-        <p>Tare the empty platform first, place a known weight, choose its unit, then start the ten-sample calibration.</p>
+        <p>Tare the empty platform first, place a known weight, then keep it still during the one-second calibration capture.</p>
         <label htmlFor="known-weight">Known weight</label>
         <div className="input-with-unit">
           <input
@@ -500,6 +510,7 @@ function App() {
 
       <TotalWeightSection
         lower={lower}
+        measurement={telemetry?.measurement ?? null}
         onClearTarget={clearTarget}
         onSetTarget={setTarget}
         total={total}
@@ -510,6 +521,7 @@ function App() {
         <ScalePanel
           id="upper"
           label="Upper / Dripper"
+          measurement={telemetry?.measurement ?? null}
           onCalibrate={setCalibrationChannel}
           onTare={tare}
           scale={upper}
@@ -517,6 +529,7 @@ function App() {
         <ScalePanel
           id="lower"
           label="Lower / Carafe"
+          measurement={telemetry?.measurement ?? null}
           onCalibrate={setCalibrationChannel}
           onTare={tare}
           scale={lower}
@@ -524,8 +537,8 @@ function App() {
       </div>
 
       <section className="health-rail" aria-label="Device status">
-        <HealthItem healthy={Boolean(upper?.ready)} label="Upper HX711" value={upper?.ready ? 'Ready' : 'Unavailable'} />
-        <HealthItem healthy={Boolean(lower?.ready)} label="Lower HX711" value={lower?.ready ? 'Ready' : 'Unavailable'} />
+        <HealthItem healthy={Boolean(upper?.ready && upper.calibration_valid && !upper.saturated)} label="Upper HX711" value={!upper?.calibration_valid ? 'Calibration required' : upper?.ready ? 'Ready' : 'Unavailable'} />
+        <HealthItem healthy={Boolean(lower?.ready && lower.calibration_valid && !lower.saturated)} label="Lower HX711" value={!lower?.calibration_valid ? 'Calibration required' : lower?.ready ? 'Ready' : 'Unavailable'} />
         <HealthItem healthy={wifiConnected} label="Wi-Fi" value={wifiConnected ? 'Connected' : 'Setup required'} />
         <HealthItem clock healthy={online} label="Last update" value={lastUpdate} />
       </section>
