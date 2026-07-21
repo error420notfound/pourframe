@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildSchedule, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
 import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
+import { tareBothScales } from './brewSession'
+import { brewMilestones, traceColumns } from './BrewGraph'
 import { defaultRecipes } from './defaultRecipes'
-import { LibraryApiError, parseLegacyBrews, parseLegacyRecipes, retainNewestBrews, retryOnConflict } from './library'
-import { decodeTrace, encodeTrace, traceSample } from './trace'
+import { LibraryApiError, loadBrewTrace, parseLegacyBrews, parseLegacyRecipes, retainNewestBrews, retryOnConflict } from './library'
+import { BrewTraceBuffer, decodeTrace, encodeTrace, traceSample } from './trace'
 import type { DeviceTelemetry, ProtocolAck } from './types'
 import type { BrewMachineState } from './brewMachine'
 import { usableScale, validTelemetry } from './useDevice'
@@ -133,6 +135,47 @@ describe('10 Hz trace format', () => {
     encoded.bytes[20] ^= 1
     expect(() => decodeTrace(encoded.bytes)).toThrow('checksum')
   })
+
+  it('publishes append and clear events without copying the trace array', () => {
+    const buffer = new BrewTraceBuffer()
+    const events: string[] = []
+    const unsubscribe = buffer.subscribe((event) => events.push(event.type))
+    buffer.append(traceSample(telemetry(), undefined, 100, 0))
+    expect(buffer.samples()).toHaveLength(1)
+    buffer.clear(); unsubscribe()
+    expect(buffer.samples()).toHaveLength(0)
+    expect(events).toEqual(['append', 'clear'])
+  })
+
+  it('maps saved trace samples into uPlot columns', () => {
+    const sample = traceSample(telemetry(), undefined, 250, 0)
+    expect(traceColumns([sample])).toEqual([[0.25], [20], [10], [10]])
+  })
+})
+
+describe('brew graph milestones and dual tare', () => {
+  it('labels coffee and actual pour transitions without inventing missed points', () => {
+    const recipe = { ...defaultRecipes[0], coffee: 16, water: 320, bloom: 60, poursAfterBloom: 4 }
+    const schedule = buildSchedule(recipe)
+    const transitions = [
+      { transition_id: 'bloom', step_id: 'bloom', scheduled_elapsed_ms: 0, actual_elapsed_ms: 0, actual_timestamp: new Date(0).toISOString(), outcome: 'automatic' as const, cue: 'completed' as const, reduced_confidence: false },
+      { transition_id: 'pour-1', step_id: 'pour-1', scheduled_elapsed_ms: 30_000, actual_elapsed_ms: 32_000, actual_timestamp: new Date(32_000).toISOString(), outcome: 'manual' as const, cue: 'completed' as const, reduced_confidence: false },
+    ]
+    const points = brewMilestones(recipe, schedule, transitions)
+    expect(points.map((point) => point.label)).toEqual(['Coffee · 16 g', 'Bloom · +60 g / 60 g total', 'Pour 1 · +65 g / 125 g total'])
+    expect(points.map((point) => point.elapsedSeconds)).toEqual([0, 0, 32])
+  })
+
+  it('tares both channels concurrently and reports a partial failure', async () => {
+    const calls: string[] = []
+    const send = vi.fn(async (_command: string, channel: string) => {
+      calls.push(channel)
+      if (channel === 'lower') throw new Error('lower failed')
+      return ack(channel)
+    })
+    await expect(tareBothScales(send)).resolves.toEqual({ upper: true, lower: false })
+    expect(calls.sort()).toEqual(['lower', 'upper'])
+  })
 })
 
 describe('telemetry and shared data safeguards', () => {
@@ -163,5 +206,9 @@ describe('telemetry and shared data safeguards', () => {
     const recipe = defaultRecipes[0]
     const records = Array.from({ length: 7 }, (_, index) => ({ id: `brew-${index}`, completed_at: new Date(index * 1000).toISOString(), elapsed_s: 180, recipe, schedule: buildSchedule(recipe), baselines: [], transitions: [], final: { upper_g: null, lower_g: null, total_g: null, beverage_g: null }, sensor_summary: newSensorSummary('timer_only'), trace: null }))
     expect(retainNewestBrews(records).map((record) => record.id)).toEqual(['brew-6', 'brew-5', 'brew-4', 'brew-3', 'brew-2'])
+  })
+
+  it('reports a missing saved trace cleanly in development history', async () => {
+    await expect(loadBrewTrace('missing-brew')).rejects.toMatchObject({ status: 404, code: 'trace_not_found' })
   })
 })

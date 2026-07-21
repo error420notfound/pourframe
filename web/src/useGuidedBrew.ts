@@ -4,7 +4,7 @@ import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBre
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
 import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus, StepTransition } from './brewTypes'
 import { playCue } from './audio'
-import { encodeTrace, traceSample, type BrewTraceSample } from './trace'
+import { BrewTraceBuffer, encodeTrace, traceSample } from './trace'
 import type { DeviceCommandPayload, DeviceTelemetry, ProtocolAck } from './types'
 import type { ConnectionState } from './useDevice'
 import { usableScale } from './useDevice'
@@ -38,7 +38,8 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
   const countdownTimers = useRef<number[]>([])
   const pausedStep = useRef<number | null>(null)
   const pendingStep = useRef<{ index: number; transitionId: string; source: 'automatic' | 'manual' } | null>(null)
-  const trace = useRef<BrewTraceSample[]>([])
+  const trace = useRef<BrewTraceBuffer | null>(null)
+  if (trace.current == null) trace.current = new BrewTraceBuffer()
   const summary = useRef(newSensorSummary('device'))
   const lastTelemetrySequence = useRef<number | null>(null)
   const saved = useRef(false)
@@ -154,11 +155,11 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
   }, [activate, machine.phase, telemetry])
 
   useEffect(() => {
-    if (machine.mode !== 'device' || clockStartedAt.current == null || machine.phase === 'IDLE' || machine.phase === 'PREPARING' || machine.phase === 'READY' || machine.phase === 'COMPLETE' || !telemetry || telemetry.seq === lastTelemetrySequence.current) return
+    if (machine.mode !== 'device' || clockStartedAt.current == null || machine.phase === 'IDLE' || machine.phase === 'PREPARING' || machine.phase === 'READY' || machine.phase === 'PAUSED' || machine.phase === 'COMPLETE' || !telemetry || telemetry.seq === lastTelemetrySequence.current) return
     lastTelemetrySequence.current = telemetry.seq
     summary.current = addSensorSample(summary.current, telemetry)
     const baseline = machine.baselines[machine.baselines.length - 1]
-    if (trace.current.length < 4200) trace.current.push(traceSample(telemetry, baseline, Math.round(elapsedNow()), Math.max(0, machine.currentStepIndex)))
+    if (trace.current!.samples().length < 4200) trace.current!.append(traceSample(telemetry, baseline, Math.round(elapsedNow()), Math.max(0, machine.currentStepIndex)))
   }, [elapsedNow, machine.baselines, machine.currentStepIndex, machine.mode, machine.phase, telemetry])
 
   useEffect(() => {
@@ -169,13 +170,14 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
   const prepare = useCallback(async () => {
     const validation = validateRecipe(recipe)
     if (!validation.valid) { setMessage(Object.values(validation.errors)[0] ?? 'Recipe is invalid.'); setPrepStage('confirm'); return }
+    trace.current!.clear()
     const validationId = createId('brew')
     event({ type: 'PREPARE', brewId: validationId })
     setPrepStage('working'); setMessage('Checking scale health and waiting for tare acknowledgements…')
     const result = await prepareDevice(connection, telemetry, recipe.water, sendCommand)
     setMessage(result.message)
     if (result.kind === 'timer') { event({ type: 'ERROR', message: result.message }); setPrepStage('timer'); return }
-    event({ type: 'PREPARED', mode: 'device' }); setPrepStage(null); saved.current = false; trace.current = []; summary.current = newSensorSummary('device'); lastTelemetrySequence.current = null
+    event({ type: 'PREPARED', mode: 'device' }); setPrepStage(null); saved.current = false; summary.current = newSensorSummary('device'); lastTelemetrySequence.current = null
     beginCountdown(0)
   }, [beginCountdown, connection, event, recipe, sendCommand, telemetry])
 
@@ -183,7 +185,7 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
     const brewId = machineRef.current.brewId || createId('brew')
     if (machineRef.current.phase !== 'PREPARING' && machineRef.current.phase !== 'ERROR') event({ type: 'PREPARE', brewId })
     if (machineRef.current.phase === 'ERROR') { machineRef.current = { ...initialBrewMachine(), phase: 'PREPARING', brewId }; setMachine(machineRef.current) }
-    event({ type: 'PREPARED', mode: 'timer_only' }); setPrepStage(null); setMessage('Timer-only brew started. Scale readings will not be recorded.'); saved.current = false; trace.current = []; summary.current = newSensorSummary('timer_only')
+    event({ type: 'PREPARED', mode: 'timer_only' }); setPrepStage(null); setMessage('Timer-only brew started. Scale readings will not be recorded.'); saved.current = false; trace.current!.clear(); summary.current = newSensorSummary('timer_only')
     beginCountdown(0)
   }, [beginCountdown, event])
 
@@ -220,14 +222,14 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
     const cueId = machineRef.current.activeCueId
     if (cueId) void sendOnce(`cancel:${cueId}`, { command: 'brew_step_cue_cancel', cue_id: cueId }).catch(() => undefined)
     void sendProtocolCommand({ command: 'brew_step_clear' }).catch(() => undefined)
-    clearCountdown(); clockStartedAt.current = null; pausedAt.current = null; pausedTotal.current = 0; pendingStep.current = null; trace.current = []; summary.current = newSensorSummary('device'); setElapsedMs(0); setPrepStage(null); setMessage(''); updatePhysicalCue('ready'); event({ type: 'RESET' })
+    clearCountdown(); clockStartedAt.current = null; pausedAt.current = null; pausedTotal.current = 0; pendingStep.current = null; trace.current!.clear(); summary.current = newSensorSummary('device'); setElapsedMs(0); setPrepStage(null); setMessage(''); updatePhysicalCue('ready'); event({ type: 'RESET' })
   }, [clearCountdown, event, sendOnce, sendProtocolCommand, updatePhysicalCue])
 
   const finish = useCallback(async () => {
     if (saved.current) return
     saved.current = true; clearCountdown(); event({ type: 'COMPLETE' }); playCue('complete', sound)
     void sendProtocolCommand({ command: 'brew_step_clear' }).catch(() => undefined)
-    const encoded = machineRef.current.mode === 'device' ? encodeTrace(trace.current) : null
+    const encoded = machineRef.current.mode === 'device' ? encodeTrace(trace.current!.samples()) : null
     const recordDeviceData = machineRef.current.mode === 'device'
     const finalLower = recordDeviceData && usableScale(telemetry?.scales.lower) ? telemetry!.scales.lower.grams : null
     const record: BrewRecord = { id: machineRef.current.brewId, completed_at: new Date().toISOString(), elapsed_s: elapsedNow() / 1000, recipe: normalizeRecipe(recipe), schedule, baselines: machineRef.current.baselines, transitions: machineRef.current.transitions, final: { upper_g: recordDeviceData && usableScale(telemetry?.scales.upper) ? telemetry!.scales.upper.grams : null, lower_g: finalLower, total_g: recordDeviceData && telemetry?.total.available && !telemetry.total.partial && Number.isFinite(telemetry.total.grams) ? telemetry.total.grams : null, beverage_g: finalLower }, sensor_summary: summary.current, trace: encoded?.metadata ?? null }
@@ -249,5 +251,5 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
 
   const status: BrewStatus = machine.phase === 'IDLE' || machine.phase === 'ERROR' ? 'idle' : machine.phase === 'PREPARING' || machine.phase === 'READY' ? 'preparing' : machine.phase === 'PAUSED' ? 'paused' : machine.phase === 'COMPLETE' ? 'complete' : 'brewing'
   const baseline = machine.baselines[machine.baselines.length - 1]
-  return { machine, status, elapsed: elapsedMs / 1000, schedule, prepStage, setPrepStage, message, physicalCue, relative: relativeReadings(telemetry, baseline), prepare, startTimerOnly, continueTimerOnly, pauseResume, reset, finish, manualAdvance }
+  return { machine, status, elapsed: elapsedMs / 1000, schedule, traceBuffer: trace.current, prepStage, setPrepStage, message, physicalCue, relative: relativeReadings(telemetry, baseline), prepare, startTimerOnly, continueTimerOnly, pauseResume, reset, finish, manualAdvance }
 }

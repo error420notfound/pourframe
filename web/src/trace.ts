@@ -30,6 +30,31 @@ export interface BrewTraceSample {
   stepIndex: number
 }
 
+export type BrewTraceBufferEvent = { type: 'append'; sample: BrewTraceSample } | { type: 'clear' }
+type BrewTraceBufferListener = (event: BrewTraceBufferEvent) => void
+
+export class BrewTraceBuffer {
+  private values: BrewTraceSample[] = []
+  private listeners = new Set<BrewTraceBufferListener>()
+
+  append(sample: BrewTraceSample) {
+    this.values.push(sample)
+    this.listeners.forEach((listener) => listener({ type: 'append', sample }))
+  }
+
+  clear() {
+    this.values = []
+    this.listeners.forEach((listener) => listener({ type: 'clear' }))
+  }
+
+  samples() { return this.values }
+
+  subscribe(listener: BrewTraceBufferListener) {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+}
+
 export function traceSample(telemetry: DeviceTelemetry, baseline: StepBaseline | undefined, elapsedMs: number, stepIndex: number): BrewTraceSample {
   const relative = relativeReadings(telemetry, baseline)
   let flags = 0

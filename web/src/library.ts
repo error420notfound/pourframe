@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrewRecipe, BrewRecord, Collection } from './brewTypes'
 import { defaultRecipes } from './defaultRecipes'
 import { buildSchedule, migrateRecipe } from './brew'
+import { decodeTrace, type BrewTraceSample } from './trace'
 
 type LibraryStatus = 'loading' | 'ready' | 'cached' | 'error'
 interface ApiErrorBody { error?: { code?: string; message?: string } }
@@ -14,6 +15,7 @@ const cacheStore = 'cache'
 const outboxStore = 'outbox'
 let mockRecipes: Collection<BrewRecipe> = { v: 1, revision: 0, items: [] }
 let mockBrews: Collection<BrewRecord> = { v: 1, revision: 0, items: [] }
+const mockTraces = new Map<string, Uint8Array>()
 interface PendingBrew { id: string; record: BrewRecord; trace?: ArrayBuffer }
 
 export class LibraryApiError extends Error {
@@ -153,14 +155,25 @@ async function postBrew(brew: BrewRecord) {
 }
 
 async function putTrace(id: string, trace: ArrayBuffer | Uint8Array) {
-  if (mockMode) return
   const body = trace instanceof Uint8Array ? trace : new Uint8Array(trace)
+  if (mockMode) { mockTraces.set(id, body.slice()); return }
   const response = await fetch(`${apiBase}/api/brew-traces?id=${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: body as BodyInit })
   if (!response.ok) {
     let message = response.statusText
     try { message = ((await response.json()) as ApiErrorBody).error?.message ?? message } catch { /* status text */ }
     throw new Error(message || 'Trace upload failed')
   }
+}
+
+export async function loadBrewTrace(id: string): Promise<BrewTraceSample[]> {
+  if (mockMode) {
+    const bytes = mockTraces.get(id)
+    if (!bytes) throw new LibraryApiError(404, 'trace_not_found', 'This brew trace is unavailable.')
+    return decodeTrace(bytes)
+  }
+  const response = await fetch(`${apiBase}/api/brew-traces?id=${encodeURIComponent(id)}`)
+  if (!response.ok) throw new LibraryApiError(response.status, 'trace_load_failed', response.status === 404 ? 'This brew trace is unavailable.' : 'The brew trace could not be loaded.')
+  return decodeTrace(new Uint8Array(await response.arrayBuffer()))
 }
 
 export function legacyDataAvailable() {

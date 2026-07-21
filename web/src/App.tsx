@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import { BookOpen, ChevronRight, Coffee, History, Moon, Pause, Play, RotateCcw, Save, Scale, Sun, Volume2, VolumeX } from 'lucide-react'
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
 import { buildSchedule, createId, formatRecipeInput, formatRecipeWeight, formatTime, migrateRecipe, normalizeRecipe, updateRecipeNumber, validateRecipe } from './brew'
+import { BrewGraph, brewMilestones } from './BrewGraph'
 import { completePairedTelemetry, type BrewMachineState } from './brewMachine'
+import { tareBothScales } from './brewSession'
 import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus } from './brewTypes'
 import { defaultRecipes } from './defaultRecipes'
-import { useLibrary } from './library'
+import { loadBrewTrace, useLibrary } from './library'
+import type { BrewTraceSample } from './trace'
 import type { DeviceTelemetry, MeasurementTelemetry, ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
 import { usableScale, useDevice, type ConnectionState } from './useDevice'
 import { useGuidedBrew } from './useGuidedBrew'
@@ -33,6 +36,34 @@ function TickRail() {
 function formatWeight(value: number) {
   const rounded = Math.round(value * 10) / 10
   return (Object.is(rounded, -0) ? 0 : rounded).toFixed(1)
+}
+
+interface DualTareControl {
+  tareBoth: () => Promise<void>
+  busy: boolean
+  enabled: boolean
+  message: string
+}
+
+function useDualTare(sendCommand: ReturnType<typeof useDevice>['sendCommand'], enabled: boolean): DualTareControl {
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const busyRef = useRef(false)
+  const tareBoth = useCallback(async () => {
+    if (!enabled || busyRef.current) return
+    busyRef.current = true; setBusy(true); setMessage('Taring both scales…')
+    const result = await tareBothScales(sendCommand)
+    const failed: string[] = []
+    if (!result.upper) failed.push('upper')
+    if (!result.lower) failed.push('lower')
+    if (!failed.length) setMessage('Both scales tared')
+    else {
+      const succeeded = ['upper', 'lower'].filter((name) => !failed.includes(name))
+      setMessage(`${failed.map((name) => `${name[0].toUpperCase()}${name.slice(1)} failed`).join(' and ')}${succeeded.length ? `; ${succeeded.join(' and ')} tared` : ''}.`)
+    }
+    busyRef.current = false; setBusy(false)
+  }, [enabled, sendCommand])
+  return { tareBoth, busy, enabled, message }
 }
 
 function MeasurementLine({ measurement, fault }: { measurement: MeasurementTelemetry | null; fault: boolean }) {
@@ -211,9 +242,10 @@ interface TotalWeightSectionProps {
   measurement: MeasurementTelemetry | null
   onSetTarget: (id: TargetId, grams: number) => Promise<void>
   onClearTarget: (id: TargetId) => Promise<void>
+  dualTare: DualTareControl
 }
 
-function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onClearTarget }: TotalWeightSectionProps) {
+function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onClearTarget, dualTare }: TotalWeightSectionProps) {
   const targetGrams = total?.target_grams
   const liveGrams = total?.grams
   const hasReading = Boolean(total?.available && liveGrams != null)
@@ -258,6 +290,12 @@ function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onC
             <h2 id="total-weight-heading">Total Weight</h2>
           </div>
           <span className={total?.partial ? 'total-source total-source--partial' : 'total-source'}>{sourceLabel}</span>
+        </div>
+        <div className="total-tare">
+          <button className="button button--primary" disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button">
+            {dualTare.busy ? 'Taring both…' : 'Tare both scales'}
+          </button>
+          <span role="status">{dualTare.message}</span>
         </div>
         <div className={hasReading ? 'total-weight__value' : 'total-weight__value total-weight__value--unavailable'} aria-live="polite">
           <span>{hasReading ? formatWeight(liveGrams!) : '—'}</span>
@@ -477,9 +515,10 @@ interface DeviceWorkspaceProps {
   mockMode: boolean
   sendCommand: ReturnType<typeof useDevice>['sendCommand']
   saveWifi: ReturnType<typeof useDevice>['saveWifi']
+  dualTare: DualTareControl
 }
 
-function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, saveWifi, mockMode }: DeviceWorkspaceProps) {
+function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, saveWifi, mockMode, dualTare }: DeviceWorkspaceProps) {
   const [calibrationChannel, setCalibrationChannel] = useState<ScaleId | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -520,6 +559,7 @@ function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, sav
         </div>
       </div>
       <TotalWeightSection
+        dualTare={dualTare}
         lower={lower}
         measurement={telemetry?.measurement ?? null}
         onClearTarget={clearTarget}
@@ -610,7 +650,7 @@ function PreparationModal({ stage, message, recipe, usableUpper, usableLower, on
   )
 }
 
-function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relative, phase, cue }: { telemetry: DeviceTelemetry | null; target: number; stepTarget: number; flowTarget: number; mode: BrewMode; relative: { relativeUpper: number | null; relativeLower: number | null; stepWaterAdded: number | null }; phase: BrewMachineState['phase']; cue: string }) {
+function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relative, phase, cue, dualTare }: { telemetry: DeviceTelemetry | null; target: number; stepTarget: number; flowTarget: number; mode: BrewMode; relative: { relativeUpper: number | null; relativeLower: number | null; stepWaterAdded: number | null }; phase: BrewMachineState['phase']; cue: string; dualTare: DualTareControl }) {
   const upper = mode === 'device' ? telemetry?.scales.upper.grams ?? null : null
   const lower = mode === 'device' && usableScale(telemetry?.scales.lower) ? telemetry!.scales.lower.grams : null
   const total = mode === 'device' && telemetry?.total.available && !telemetry.total.partial && Number.isFinite(telemetry.total.grams) ? telemetry.total.grams : null
@@ -619,13 +659,15 @@ function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relativ
   const remaining = stepWaterAdded == null ? null : stepTarget - stepWaterAdded
   const warning = mode === 'timer_only' ? 'Timer-only · scale data unavailable' : phase === 'WAITING_FOR_STABLE_BASELINE' ? 'Waiting for a stable scale.' : telemetry?.total.partial ? 'Partial measurement · reduced confidence' : !completePairedTelemetry(telemetry) ? 'Scale data unavailable or unsynchronized' : null
   return <section className={warning ? 'brew-readings brew-readings--warning' : 'brew-readings'} aria-label="Live brew readings">
+    <div className="brew-readings__tools"><strong>Brew readings</strong><button className="brew-secondary" disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button">{dualTare.busy ? 'Taring…' : 'Tare both scales'}</button></div>
+    {dualTare.message ? <p className="dual-tare-message" role="status">{dualTare.message}</p> : null}
     <div className="brew-readings__primary"><span>Current step water</span><strong>{stepWaterAdded == null ? '—' : `${formatWeight(stepWaterAdded)} g`}</strong><small>{remaining == null ? `Step target ${formatRecipeWeight(stepTarget)} g` : remaining > 0 ? `${formatWeight(remaining)} g remaining` : `${formatWeight(Math.abs(remaining))} g over target`}</small></div>
     <dl><div><dt>Cumulative water</dt><dd>{total == null ? '—' : `${formatWeight(total)} g`}</dd><small>Target {formatRecipeWeight(target)} g</small></div><div><dt>Dripper absolute</dt><dd>{upper == null ? '—' : `${formatWeight(upper)} g`}</dd><small>Relative {mode === 'device' && relative.relativeUpper != null ? `${formatWeight(relative.relativeUpper)} g` : '—'}</small></div><div><dt>Final beverage weight</dt><dd>{lower == null ? '—' : `${formatWeight(lower)} g`}</dd></div><div><dt>Pour rate</dt><dd>{measuredRate == null ? '—' : `${formatWeight(measuredRate)} g/s`}</dd><small>Guidance {formatRecipeWeight(flowTarget)} g/s{measuredRate == null ? '' : ` · ${measuredRate >= flowTarget ? '+' : ''}${formatWeight(measuredRate - flowTarget)} g/s`}</small></div></dl>
     <div className="brew-reading-state"><span>{mode === 'timer_only' ? 'No measurement' : telemetry?.measurement.state === 'DISTURBED_OR_UNCERTAIN' ? 'Uncertain' : telemetry?.measurement.state ?? 'No measurement'} · Physical cue {cue.replace('_', ' ')}</span>{warning ? <strong role="status">{warning}</strong> : <strong>Scale data healthy</strong>}</div>
   </section>
 }
 
-function BrewWorkspace({ recipe, status, elapsed, mode, telemetry, machine, relative, cue, message, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly }: { recipe: BrewRecipe; status: BrewStatus; elapsed: number; mode: BrewMode; telemetry: DeviceTelemetry | null; machine: BrewMachineState; relative: { relativeUpper: number | null; relativeLower: number | null; stepWaterAdded: number | null }; cue: string; message: string; onStart: () => void; onPause: () => void; onReset: () => void; onFinish: () => void; onManualAdvance: () => void; onTimerOnly: () => void }) {
+function BrewWorkspace({ recipe, status, elapsed, mode, telemetry, machine, relative, cue, message, traceBuffer, dualTare, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly }: { recipe: BrewRecipe; status: BrewStatus; elapsed: number; mode: BrewMode; telemetry: DeviceTelemetry | null; machine: BrewMachineState; relative: { relativeUpper: number | null; relativeLower: number | null; stepWaterAdded: number | null }; cue: string; message: string; traceBuffer: NonNullable<ReturnType<typeof useGuidedBrew>['traceBuffer']>; dualTare: DualTareControl; onStart: () => void; onPause: () => void; onReset: () => void; onFinish: () => void; onManualAdvance: () => void; onTimerOnly: () => void }) {
   const schedule = useMemo(() => buildSchedule(recipe), [recipe])
   const index = machine.phase === 'DRAWDOWN' || machine.phase === 'COMPLETE' ? schedule.length - 1 : Math.max(0, machine.currentStepIndex)
   const step = schedule[index] ?? schedule[0]
@@ -646,8 +688,9 @@ function BrewWorkspace({ recipe, status, elapsed, mode, telemetry, machine, rela
       </div>
       <div className="brew-progress" role="progressbar" aria-label="Brew progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><span style={{ width: `${progress * 100}%` }} /></div>
     </section>
-    <LiveReadings telemetry={telemetry} target={step.cumulative} stepTarget={readingStep.pour} flowTarget={recipe.flowRate} mode={mode} relative={relative} phase={machine.phase} cue={cue} />
+    <LiveReadings telemetry={telemetry} target={step.cumulative} stepTarget={readingStep.pour} flowTarget={recipe.flowRate} mode={mode} relative={relative} phase={machine.phase} cue={cue} dualTare={dualTare} />
     {message ? <p className="brew-session-message" role="status">{message}</p> : null}
+    <section className="brew-graph-card" aria-labelledby="live-brew-graph-heading"><div className="section-heading"><div><p className="brew-eyebrow">Automatic recording</p><h3 id="live-brew-graph-heading">Live brew graph</h3></div><span>{mode === 'timer_only' ? 'Timer only' : status === 'brewing' ? 'Recording' : status === 'paused' ? 'Paused' : status === 'complete' ? 'Saved' : 'Ready'}</span></div><BrewGraph source={traceBuffer} milestones={brewMilestones(recipe, schedule, machine.transitions)} /></section>
     <section className="brew-guide" aria-live="polite"><div className="brew-guide__current"><span>Current step · target {formatRecipeWeight(step.cumulative)} g</span><h3>{step.name}</h3><p>{step.instruction}</p>{next ? <div className="next-step"><span>Next</span><strong>{next.name} at {formatTime(next.start)}</strong><ChevronRight aria-hidden="true" /></div> : null}</div><ol className="brew-timeline">{schedule.map((item, itemIndex) => <li className={itemIndex < index ? 'done' : itemIndex === index ? 'active' : ''} key={item.id}><span>{itemIndex < index ? '✓' : itemIndex + 1}</span><div><strong>{item.name}</strong><small>{formatRecipeWeight(item.cumulative)} g · {formatTime(item.start)}</small></div></li>)}</ol></section>
   </div>
 }
@@ -661,8 +704,44 @@ function RecipeWorkspace({ recipes, active, onSelect, onSave, onDelete }: { reci
   return <div className="recipe-workspace"><aside className="recipe-library"><div><p className="brew-eyebrow">Shared library</p><h2>Recipes</h2></div><button className="new-recipe" onClick={() => setDraft({ ...defaultRecipes[0], id: createId('recipe'), name: 'New recipe' })}>New recipe</button><ul>{recipes.map((recipe) => <li key={recipe.id}><button className={recipe.id === active.id ? 'active' : ''} onClick={() => onSelect(migrateRecipe(recipe))}><strong>{recipe.name}</strong><span>{formatRecipeWeight(recipe.coffee)} g / {formatRecipeWeight(recipe.water)} g</span></button><button aria-label={`Delete ${recipe.name}`} className="recipe-delete" onClick={() => void onDelete(recipe.id)}>×</button></li>)}</ul></aside><section className="recipe-editor"><div className="editor-heading"><div><p className="brew-eyebrow">Expert controls</p><h2>Edit recipe</h2></div><button className="brew-primary" onClick={save}><Save aria-hidden="true" />Save</button></div><label className="recipe-field recipe-field--wide"><span>Recipe name</span><input maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label><div className="recipe-grid">{numberField('Coffee', 'coffee', 0.5, 'g')}{numberField('Water', 'water', 1, 'g')}{numberField('Ratio', 'ratio', 0.1, ':1')}{numberField('Bloom', 'bloom', 1, 'g')}{numberField('Pours after bloom', 'poursAfterBloom', 1, '')}{numberField('Brew time', 'brewTime', 5, 's')}{numberField('Flow rate', 'flowRate', 0.1, 'g/s')}{numberField('Temperature', 'temperature', 1, '°C')}</div><label className="recipe-field recipe-field--wide"><span>Notes</span><textarea maxLength={500} value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label><p className="library-message" role="status">{message}</p></section></div>
 }
 
+function HistoryBrewItem({ brew }: { brew: BrewRecord }) {
+  const [expanded, setExpanded] = useState(false)
+  const [samples, setSamples] = useState<BrewTraceSample[] | null>(null)
+  const [traceState, setTraceState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [traceMessage, setTraceMessage] = useState('')
+  const load = useCallback(async () => {
+    if (!brew.trace?.available) return
+    setTraceState('loading'); setTraceMessage('Loading saved trace…')
+    try {
+      const loaded = await loadBrewTrace(brew.id)
+      setSamples(loaded); setTraceState('ready'); setTraceMessage('')
+    } catch (error) {
+      setTraceState('error'); setTraceMessage(error instanceof Error ? error.message : 'The saved trace could not be loaded.')
+    }
+  }, [brew.id, brew.trace?.available])
+  const toggle = () => {
+    const next = !expanded
+    setExpanded(next)
+    if (next && traceState === 'idle' && brew.trace?.available) void load()
+  }
+  const milestones = useMemo(() => brewMilestones(brew.recipe, brew.schedule, brew.transitions), [brew.recipe, brew.schedule, brew.transitions])
+  return <article className={expanded ? 'history-brew history-brew--expanded' : 'history-brew'}>
+    <button aria-expanded={expanded} className="history-brew__summary" onClick={toggle} type="button">
+      <div><strong>{brew.recipe.name}</strong><span>{new Date(brew.completed_at).toLocaleString()}</span></div>
+      <dl><div><dt>Time</dt><dd>{formatTime(brew.elapsed_s)}</dd></div><div><dt>Final beverage weight</dt><dd>{brew.final.beverage_g == null ? '—' : `${formatWeight(brew.final.beverage_g)} g`}</dd></div><div><dt>Combined water</dt><dd>{brew.final.total_g == null ? '—' : `${formatWeight(brew.final.total_g)} g`}</dd></div><div><dt>Trace</dt><dd>{brew.trace?.available ? `${brew.trace.sample_count} samples` : '—'}</dd></div></dl>
+      <ChevronRight aria-hidden="true" />
+    </button>
+    {expanded ? <div className="history-brew__graph">
+      {!brew.trace?.available ? <p>This timer-only or legacy brew has no recorded scale graph.</p> : null}
+      {traceState === 'loading' ? <p>Loading saved trace…</p> : null}
+      {traceState === 'error' ? <div className="history-trace-error"><p role="alert">{traceMessage}</p><button className="brew-secondary" onClick={() => void load()}>Retry</button></div> : null}
+      {traceState === 'ready' && samples ? <BrewGraph compact samples={samples} milestones={milestones} emptyMessage="This brew trace contains no samples." /> : null}
+    </div> : null}
+  </article>
+}
+
 function HistoryWorkspace({ brews, onClear }: { brews: BrewRecord[]; onClear: () => Promise<void> }) {
-  return <section className="history-workspace"><div className="section-heading"><div><p className="brew-eyebrow">Shared on PourFrame · latest five</p><h2>Brew history</h2></div><button className="brew-secondary" disabled={!brews.length} onClick={() => window.confirm('Clear all shared brew history?') && void onClear()}>Clear history</button></div>{brews.length ? <div className="history-list">{brews.map((brew) => <article key={brew.id}><div><strong>{brew.recipe.name}</strong><span>{new Date(brew.completed_at).toLocaleString()}</span></div><dl><div><dt>Time</dt><dd>{formatTime(brew.elapsed_s)}</dd></div><div><dt>Final beverage weight</dt><dd>{brew.final.beverage_g == null ? '—' : `${formatWeight(brew.final.beverage_g)} g`}</dd></div><div><dt>Combined water</dt><dd>{brew.final.total_g == null ? '—' : `${formatWeight(brew.final.total_g)} g`}</dd></div><div><dt>Trace</dt><dd>{brew.trace?.available ? `${brew.trace.sample_count} samples` : '—'}</dd></div></dl></article>)}</div> : <div className="empty-history"><History aria-hidden="true" /><h3>No completed brews yet</h3><p>Your next completed brew will be saved here for everyone using this PourFrame.</p></div>}</section>
+  return <section className="history-workspace"><div className="section-heading"><div><p className="brew-eyebrow">Shared on PourFrame · latest five</p><h2>Brew history</h2></div><button className="brew-secondary" disabled={!brews.length} onClick={() => window.confirm('Clear all shared brew history?') && void onClear()}>Clear history</button></div>{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <div className="empty-history"><History aria-hidden="true" /><h3>No completed brews yet</h3><p>Your next completed brew will be saved here for everyone using this PourFrame.</p></div>}</section>
 }
 
 function App() {
@@ -685,16 +764,19 @@ function App() {
 
   const selectRecipe = (next: BrewRecipe) => { setRecipe(migrateRecipe(next)); guided.reset() }
   const online = device.connection === 'online' && Boolean(device.telemetry)
+  const tareBothAvailable = online && usableScale(device.telemetry?.scales.upper) && usableScale(device.telemetry?.scales.lower) &&
+    (guided.status === 'idle' || guided.status === 'complete') && guided.prepStage == null
+  const dualTare = useDualTare(device.sendCommand, tareBothAvailable)
 
   return <main className="appliance" data-theme={dark ? 'dark' : 'light'}>
     <header className="appliance-header"><button className="brand" onClick={() => setTab('brew')}><span>PF</span><div><strong>PourFrame</strong><small>Local brewing appliance</small></div></button><nav aria-label="Primary navigation">{([['brew', 'Brew', Coffee], ['recipes', 'Recipes', BookOpen], ['history', 'History', History], ['device', 'Device', Scale]] as const).map(([id, label, Icon]) => <button className={tab === id ? 'active' : ''} key={id} onClick={() => setTab(id)}><Icon aria-hidden="true" />{label}</button>)}</nav><div className="appliance-actions"><span className={online ? 'appliance-connection online' : 'appliance-connection'}><i />{online ? 'Scale live' : device.connection === 'connecting' ? 'Finding scale' : 'Scale offline'}</span><button aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'} onClick={() => setSound((value) => !value)}>{sound ? <Volume2 /> : <VolumeX />}</button><button aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={() => setDark((value) => !value)}>{dark ? <Sun /> : <Moon />}</button></div></header>
     {library.hasLegacy ? <div className="legacy-banner"><span>Browser-saved PourOver recipes were found.</span><button onClick={() => void library.importLegacy()}>Import to PourFrame</button></div> : null}
     {library.status !== 'ready' ? <div className={`library-status library-status--${library.status}`} role="status">{library.message}</div> : null}
     <div className="appliance-body">
-      {tab === 'brew' ? <BrewWorkspace recipe={recipe} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.telemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} onStart={() => guided.setPrepStage('confirm')} onPause={guided.pauseResume} onReset={guided.reset} onFinish={() => void guided.finish()} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} /> : null}
+      {tab === 'brew' ? <BrewWorkspace recipe={recipe} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.telemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} traceBuffer={guided.traceBuffer!} dualTare={dualTare} onStart={() => guided.setPrepStage('confirm')} onPause={guided.pauseResume} onReset={guided.reset} onFinish={() => void guided.finish()} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} /> : null}
       {tab === 'recipes' ? <RecipeWorkspace recipes={library.recipes} active={recipe} onSelect={selectRecipe} onSave={async (value) => { await library.saveRecipe(value); selectRecipe(value) }} onDelete={async (id) => { await library.deleteRecipe(id); if (recipe.id === id) selectRecipe(library.recipes.find((item) => item.id !== id) ?? defaultRecipes[0]) }} /> : null}
       {tab === 'history' ? <HistoryWorkspace brews={library.brews} onClear={library.clearBrews} /> : null}
-      {tab === 'device' ? <DeviceWorkspace telemetry={device.telemetry} connection={device.connection} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} /> : null}
+      {tab === 'device' ? <DeviceWorkspace telemetry={device.telemetry} connection={device.connection} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} dualTare={dualTare} /> : null}
     </div>
     {guided.prepStage ? <PreparationModal stage={guided.prepStage} message={guided.message} recipe={recipe} usableUpper={usableScale(device.telemetry?.scales.upper)} usableLower={usableScale(device.telemetry?.scales.lower)} onClose={() => guided.setPrepStage(null)} onPrepare={() => void guided.prepare()} onStartTimer={guided.startTimerOnly} /> : null}
   </main>

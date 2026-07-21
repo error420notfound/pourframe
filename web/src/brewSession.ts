@@ -7,6 +7,14 @@ import { stablePairedTelemetry } from './brewMachine'
 export interface PreparationResult { kind: 'ready' | 'timer'; message: string }
 export type CommandSender = (command: 'tare' | 'set_target', channel: ScaleId | TargetId, grams?: number) => Promise<ProtocolAck>
 
+export async function tareBothScales(send: CommandSender) {
+  const [upper, lower] = await Promise.allSettled([send('tare', 'upper'), send('tare', 'lower')])
+  return {
+    upper: upper.status === 'fulfilled',
+    lower: lower.status === 'fulfilled',
+  }
+}
+
 export async function prepareDevice(connection: ConnectionState, telemetry: DeviceTelemetry | null, water: number, send: CommandSender): Promise<PreparationResult> {
   if (connection !== 'online') return { kind: 'timer', message: 'PourFrame is not connected.' }
   if (!telemetry) return { kind: 'timer', message: 'PourFrame has not published telemetry.' }
