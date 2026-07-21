@@ -61,10 +61,11 @@ export function stablePairedTelemetry(telemetry: DeviceTelemetry | null | undefi
 }
 
 export function captureBaseline(telemetry: DeviceTelemetry, step: BrewStep, stepIndex: number, elapsedMs: number, transitionId: string, source: 'automatic' | 'manual'): { baseline: StepBaseline; transition: StepTransition } | null {
-  if (!stablePairedTelemetry(telemetry) || telemetry.total.grams == null) return null
+  if (!completePairedTelemetry(telemetry) || telemetry.total.grams == null) return null
   const now = new Date().toISOString()
-  const baseline: StepBaseline = { step_id: step.id, step_index: stepIndex, upper_g: telemetry.scales.upper.grams, lower_g: telemetry.scales.lower.grams, total_g: telemetry.total.grams, device_sample_ms: telemetry.measurement.sample_timestamp_ms, actual_elapsed_ms: elapsedMs, actual_timestamp: now, scheduled_elapsed_ms: Math.round(step.start * 1000), source, reduced_confidence: source === 'manual' }
-  return { baseline, transition: { transition_id: transitionId, step_id: step.id, scheduled_elapsed_ms: Math.round(step.start * 1000), actual_elapsed_ms: elapsedMs, actual_timestamp: now, outcome: source, cue: 'completed', reduced_confidence: source === 'manual' } }
+  const reducedConfidence = source === 'manual' || !telemetry.measurement.is_stable
+  const baseline: StepBaseline = { step_id: step.id, step_index: stepIndex, upper_g: telemetry.scales.upper.grams, lower_g: telemetry.scales.lower.grams, total_g: telemetry.total.grams, device_sample_ms: telemetry.measurement.sample_timestamp_ms, actual_elapsed_ms: elapsedMs, actual_timestamp: now, scheduled_elapsed_ms: Math.round(step.start * 1000), source, reduced_confidence: reducedConfidence }
+  return { baseline, transition: { transition_id: transitionId, step_id: step.id, scheduled_elapsed_ms: Math.round(step.start * 1000), actual_elapsed_ms: elapsedMs, actual_timestamp: now, outcome: source, cue: 'completed', reduced_confidence: reducedConfidence } }
 }
 
 export function relativeReadings(telemetry: DeviceTelemetry | null, baseline: StepBaseline | undefined) {

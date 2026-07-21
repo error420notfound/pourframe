@@ -617,7 +617,7 @@ function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, sav
 }
 
 type AppTab = 'brew' | 'recipes' | 'history' | 'device'
-type PrepStage = 'confirm' | 'working' | 'timer'
+type PrepStage = 'confirm' | 'working' | 'ready' | 'timer'
 
 interface PreparationModalProps {
   stage: PrepStage
@@ -627,14 +627,15 @@ interface PreparationModalProps {
   usableLower: boolean
   onClose: () => void
   onPrepare: () => void
+  onStart: () => void
   onStartTimer: () => void
 }
 
-function PreparationModal({ stage, message, recipe, usableUpper, usableLower, onClose, onPrepare, onStartTimer }: PreparationModalProps) {
+function PreparationModal({ stage, message, recipe, usableUpper, usableLower, onClose, onPrepare, onStart, onStartTimer }: PreparationModalProps) {
   const [coffeeReady, setCoffeeReady] = useState(false)
   const [carafeReady, setCarafeReady] = useState(false)
   return (
-    <Modal title="Prepare to brew" onClose={stage === 'working' ? () => undefined : onClose}>
+    <Modal title={stage === 'ready' ? 'Ready to brew' : 'Prepare to brew'} onClose={stage === 'working' ? () => undefined : onClose}>
       <div className="prep-flow">
         {stage === 'confirm' ? <>
           <div className="prep-recipe"><Coffee aria-hidden="true" /><div><strong>{recipe.name}</strong><span>{recipe.coffee.toFixed(1)} g coffee · {recipe.water} g water</span></div></div>
@@ -644,6 +645,7 @@ function PreparationModal({ stage, message, recipe, usableUpper, usableLower, on
           <button className="button button--primary button--full" disabled={!coffeeReady || !carafeReady} onClick={onPrepare}>Tare and prepare</button>
         </> : null}
         {stage === 'working' ? <div className="prep-working"><span className="spinner" /><strong>Preparing PourFrame</strong><p>{message}</p></div> : null}
+        {stage === 'ready' ? <div className="prep-decision"><strong>Everything is ready</strong><p>{message}</p><p>The timer starts immediately when you press Start brew.</p><button className="button button--primary button--full" onClick={onStart}><Play aria-hidden="true" />Start brew</button></div> : null}
         {stage === 'timer' ? <div className="prep-decision" role="alert"><strong>Use timer-only mode?</strong><p>{message}</p><p>No live weights or sensor confidence will be recorded.</p><button className="button button--primary button--full" onClick={onStartTimer}>Start timer only</button><button className="button button--secondary button--full" onClick={onClose}>Cancel</button></div> : null}
       </div>
     </Modal>
@@ -657,13 +659,13 @@ function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relativ
   const stepWaterAdded = mode === 'device' ? relative.stepWaterAdded : null
   const measuredRate = mode === 'device' && telemetry?.total.available ? telemetry.total.pour_rate_g_s : null
   const remaining = stepWaterAdded == null ? null : stepTarget - stepWaterAdded
-  const warning = mode === 'timer_only' ? 'Timer-only · scale data unavailable' : phase === 'WAITING_FOR_STABLE_BASELINE' ? 'Waiting for a stable scale.' : telemetry?.total.partial ? 'Partial measurement · reduced confidence' : !completePairedTelemetry(telemetry) ? 'Scale data unavailable or unsynchronized' : null
+  const warning = mode === 'timer_only' ? 'Timer-only · scale data unavailable' : phase === 'WAITING_FOR_STABLE_BASELINE' ? 'Waiting for synchronized scale data.' : telemetry?.total.partial ? 'Partial measurement · reduced confidence' : !completePairedTelemetry(telemetry) ? 'Scale data unavailable or unsynchronized' : null
   return <section className={warning ? 'brew-readings brew-readings--warning' : 'brew-readings'} aria-label="Live brew readings">
     <div className="brew-readings__tools"><strong>Brew readings</strong><button className="brew-secondary" disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button">{dualTare.busy ? 'Taring…' : 'Tare both scales'}</button></div>
     {dualTare.message ? <p className="dual-tare-message" role="status">{dualTare.message}</p> : null}
     <div className="brew-readings__primary"><span>Current step water</span><strong>{stepWaterAdded == null ? '—' : `${formatWeight(stepWaterAdded)} g`}</strong><small>{remaining == null ? `Step target ${formatRecipeWeight(stepTarget)} g` : remaining > 0 ? `${formatWeight(remaining)} g remaining` : `${formatWeight(Math.abs(remaining))} g over target`}</small></div>
     <dl><div><dt>Cumulative water</dt><dd>{total == null ? '—' : `${formatWeight(total)} g`}</dd><small>Target {formatRecipeWeight(target)} g</small></div><div><dt>Dripper absolute</dt><dd>{upper == null ? '—' : `${formatWeight(upper)} g`}</dd><small>Relative {mode === 'device' && relative.relativeUpper != null ? `${formatWeight(relative.relativeUpper)} g` : '—'}</small></div><div><dt>Final beverage weight</dt><dd>{lower == null ? '—' : `${formatWeight(lower)} g`}</dd></div><div><dt>Pour rate</dt><dd>{measuredRate == null ? '—' : `${formatWeight(measuredRate)} g/s`}</dd><small>Guidance {formatRecipeWeight(flowTarget)} g/s{measuredRate == null ? '' : ` · ${measuredRate >= flowTarget ? '+' : ''}${formatWeight(measuredRate - flowTarget)} g/s`}</small></div></dl>
-    <div className="brew-reading-state"><span>{mode === 'timer_only' ? 'No measurement' : telemetry?.measurement.state === 'DISTURBED_OR_UNCERTAIN' ? 'Uncertain' : telemetry?.measurement.state ?? 'No measurement'} · Physical cue {cue.replace('_', ' ')}</span>{warning ? <strong role="status">{warning}</strong> : <strong>Scale data healthy</strong>}</div>
+    {warning ? <div className="brew-reading-state"><strong role="status">{warning}</strong></div> : null}
   </section>
 }
 
@@ -680,7 +682,7 @@ function BrewWorkspace({ recipe, status, elapsed, mode, telemetry, machine, rela
       <div className="brew-hero__copy"><p className="brew-eyebrow">Guided brew</p><h2 id="brew-title">{recipe.name}</h2><p>{recipe.coffee.toFixed(1)} g coffee · {recipe.water} g water · 1:{recipe.ratio.toFixed(1)}</p></div>
       <div className="brew-timer"><span>{status === 'paused' ? 'Paused' : active ? step.name : status === 'complete' ? 'Complete' : 'Ready'}</span><strong>{formatTime(elapsed)}</strong><small>{formatTime(recipe.brewTime)} total</small></div>
       <div className="brew-actions">
-        {!active ? <button className="brew-primary" onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Start brew'}</button> : <button className="brew-primary" onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{status === 'paused' ? 'Resume' : 'Pause'}</button>}
+        {!active ? <button className="brew-primary" onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Prepare brew'}</button> : <button className="brew-primary" onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{status === 'paused' ? 'Resume' : 'Pause'}</button>}
         <button className="brew-secondary" disabled={elapsed === 0 && status === 'idle'} onClick={onReset}><RotateCcw aria-hidden="true" />Reset</button>
         {active ? <button className="brew-secondary" onClick={onManualAdvance}>Advance step</button> : null}
         {machine.phase === 'WAITING_FOR_STABLE_BASELINE' && mode === 'device' ? <button className="brew-secondary" onClick={onTimerOnly}>Continue timer only</button> : null}
@@ -778,7 +780,7 @@ function App() {
       {tab === 'history' ? <HistoryWorkspace brews={library.brews} onClear={library.clearBrews} /> : null}
       {tab === 'device' ? <DeviceWorkspace telemetry={device.telemetry} connection={device.connection} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} dualTare={dualTare} /> : null}
     </div>
-    {guided.prepStage ? <PreparationModal stage={guided.prepStage} message={guided.message} recipe={recipe} usableUpper={usableScale(device.telemetry?.scales.upper)} usableLower={usableScale(device.telemetry?.scales.lower)} onClose={() => guided.setPrepStage(null)} onPrepare={() => void guided.prepare()} onStartTimer={guided.startTimerOnly} /> : null}
+    {guided.prepStage ? <PreparationModal stage={guided.prepStage} message={guided.message} recipe={recipe} usableUpper={usableScale(device.telemetry?.scales.upper)} usableLower={usableScale(device.telemetry?.scales.lower)} onClose={() => guided.setPrepStage(null)} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} /> : null}
   </main>
 }
 

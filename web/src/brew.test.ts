@@ -61,17 +61,23 @@ describe('device preparation and virtual baselines', () => {
     expect(calls[2]).toBe('set_target:total')
   })
 
-  it('blocks partial or unstable preparation without sending a tare', async () => {
+  it('blocks partial preparation but keeps transiently active paired scales in device mode', async () => {
     const send = vi.fn(async (_command: string, channel: string) => ack(channel))
     await expect(prepareDevice('online', telemetry(true), 320, send)).resolves.toMatchObject({ kind: 'timer' })
-    await expect(prepareDevice('online', telemetry(false, false), 320, send)).resolves.toMatchObject({ kind: 'timer' })
     expect(send).not.toHaveBeenCalled()
+
+    await expect(prepareDevice('online', telemetry(false, false), 320, send)).resolves.toMatchObject({ kind: 'ready' })
+    expect(send).toHaveBeenCalledTimes(3)
   })
 
-  it('captures a baseline only from stable paired telemetry and computes relatives', () => {
+  it('captures a synchronized baseline without delaying for stability and computes relatives', () => {
     const step = buildSchedule(defaultRecipes[0])[0]
     const captured = captureBaseline(telemetry(), step, 0, 0, 'brew:bloom', 'automatic')
     expect(captured?.baseline.total_g).toBe(20)
+    expect(captured?.baseline.reduced_confidence).toBe(false)
+    const moving = captureBaseline(telemetry(false, false), step, 0, 0, 'moving', 'automatic')
+    expect(moving?.baseline.total_g).toBe(20)
+    expect(moving?.baseline.reduced_confidence).toBe(true)
     expect(captureBaseline(telemetry(true), step, 0, 0, 'bad', 'automatic')).toBeNull()
     const next = telemetry(); next.scales.upper.grams = 15; next.scales.lower.grams = 20; next.total.grams = 35
     expect(relativeReadings(next, captured?.baseline)).toEqual({ relativeUpper: 5, relativeLower: 10, stepWaterAdded: 15 })

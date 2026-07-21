@@ -2,7 +2,6 @@ import type { BrewMode, SensorSummary } from './brewTypes'
 import type { DeviceTelemetry, ProtocolAck, ScaleId, TargetId } from './types'
 import type { ConnectionState } from './useDevice'
 import { usableScale } from './useDevice'
-import { stablePairedTelemetry } from './brewMachine'
 
 export interface PreparationResult { kind: 'ready' | 'timer'; message: string }
 export type CommandSender = (command: 'tare' | 'set_target', channel: ScaleId | TargetId, grams?: number) => Promise<ProtocolAck>
@@ -21,7 +20,6 @@ export async function prepareDevice(connection: ConnectionState, telemetry: Devi
   if (!usableScale(telemetry.scales.upper)) return { kind: 'timer', message: 'Upper / dripper scale is unavailable, stale, uncalibrated, saturated, or has invalid cadence.' }
   if (!usableScale(telemetry.scales.lower)) return { kind: 'timer', message: 'Lower / carafe scale is unavailable, stale, uncalibrated, saturated, or has invalid cadence.' }
   if (!telemetry.measurement.pair_valid || telemetry.measurement.pair_status !== 'synchronized' || telemetry.total.partial) return { kind: 'timer', message: 'The two scale channels are not synchronized.' }
-  if (!telemetry.measurement.is_stable || !stablePairedTelemetry(telemetry)) return { kind: 'timer', message: 'Waiting for both scales to become stable.' }
   try {
     await Promise.all([send('tare', 'upper'), send('tare', 'lower')])
     await send('set_target', 'total', water)

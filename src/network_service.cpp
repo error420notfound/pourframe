@@ -8,6 +8,8 @@
 #include <cctype>
 #include <cstring>
 
+#include "frontend_delivery.h"
+
 namespace {
 constexpr uint8_t kDnsPort = 53;
 constexpr uint8_t kSetupApChannel = 6;
@@ -105,6 +107,50 @@ String apiErrorMessage(const String &code) {
   if (code.startsWith("invalid_brew")) return "The completed brew record is invalid.";
   if (code.startsWith("storage_")) return "PourFrame could not safely update shared storage.";
   return code;
+}
+
+bool frontendFileExists(const String &path) {
+  File file = LittleFS.open(path, "r");
+  const bool exists = file && !file.isDirectory();
+  file.close();
+  return exists;
+}
+
+void sendFrontendFile(AsyncWebServerRequest *request, const String &browserPath, const String &storedPath,
+                      bool gzip, bool spaFallback) {
+  File file = LittleFS.open(storedPath, "r");
+  if (!file || file.isDirectory()) {
+    file.close();
+    request->send(404, "text/plain", "Not found");
+    return;
+  }
+
+  AsyncWebServerResponse *response =
+      request->beginResponse(file, browserPath, frontend_delivery::contentTypeForPath(browserPath.c_str()));
+  if (gzip) response->addHeader("Content-Encoding", "gzip", true);
+  response->addHeader("Vary", "Accept-Encoding", true);
+  response->addHeader("Cache-Control", spaFallback ? "no-cache" : "max-age=3600", true);
+  request->send(response);
+}
+
+void sendFrontendRepresentation(AsyncWebServerRequest *request, const String &browserPath, bool spaFallback) {
+  const String gzipPath = browserPath + ".gz";
+  const bool rawExists = frontendFileExists(browserPath);
+  const bool gzipExists = frontendFileExists(gzipPath);
+  const bool gzipAccepted = frontend_delivery::acceptsGzip(request->header("Accept-Encoding").c_str());
+  const auto representation = frontend_delivery::selectRepresentation(rawExists, gzipExists, gzipAccepted);
+
+  if (representation == frontend_delivery::Representation::Gzip) {
+    sendFrontendFile(request, browserPath, gzipPath, true, spaFallback);
+  } else if (representation == frontend_delivery::Representation::Raw) {
+    sendFrontendFile(request, browserPath, browserPath, false, spaFallback);
+  } else if (representation == frontend_delivery::Representation::NotAcceptable) {
+    AsyncWebServerResponse *response = request->beginResponse(406, "text/plain", "This frontend requires gzip support.");
+    response->addHeader("Vary", "Accept-Encoding", true);
+    request->send(response);
+  } else {
+    request->send(503, "text/plain", "Pourframe UI has not been uploaded to LittleFS.");
+  }
 }
 }  // namespace
 
@@ -479,12 +525,21 @@ void NetworkService::configureRoutes() {
     server_.on(route, HTTP_ANY, [](AsyncWebServerRequest *request) { request->redirect("/"); });
   }
 
-  server_.serveStatic("/", LittleFS, "/").setDefaultFile("index.html").setCacheControl("max-age=3600");
   server_.onNotFound([](AsyncWebServerRequest *request) {
-    if (request->url().startsWith("/api/")) {
+    const String url = request->url();
+    const String exactPath = url == "/" ? "/index.html" : url;
+    const bool exactExists = frontendFileExists(exactPath) || frontendFileExists(exactPath + ".gz");
+    const auto target = frontend_delivery::classifyRequest(url.c_str(), exactExists);
+
+    if (target == frontend_delivery::RequestTarget::Api) {
       request->send(404, "application/json", "{\"error\":\"not_found\"}");
-    } else if (LittleFS.exists("/index.html")) {
-      request->send(LittleFS, "/index.html", "text/html");
+    } else if (target == frontend_delivery::RequestTarget::DirectGzip) {
+      request->send(404, "text/plain", "Not found");
+    } else if (target == frontend_delivery::RequestTarget::Root ||
+               target == frontend_delivery::RequestTarget::ExactAsset) {
+      sendFrontendRepresentation(request, exactPath, false);
+    } else if (frontendFileExists("/index.html") || frontendFileExists("/index.html.gz")) {
+      sendFrontendRepresentation(request, "/index.html", true);
     } else {
       request->send(503, "text/plain", "Pourframe UI has not been uploaded to LittleFS.");
     }
