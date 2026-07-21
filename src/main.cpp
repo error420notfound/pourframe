@@ -44,7 +44,14 @@ void printBootDiagnostics() {
   Serial.printf("HX711 pins: upper=%u/%u lower=%u/%u\n", kUpperDout, kUpperClock, kLowerDout, kLowerClock);
 }
 
-void processCommands() {
+const char *ledCommandMessage(led::CommandResult result, const char *accepted) {
+  if (result == led::CommandResult::Duplicate) return "Duplicate already handled";
+  if (result == led::CommandResult::Unavailable) return "Scale health does not allow a physical cue";
+  if (result == led::CommandResult::Invalid) return "Invalid brew LED command";
+  return accepted;
+}
+
+void processCommands(uint32_t nowMs) {
   AppCommand command{};
   for (uint8_t processed = 0; processed < 4 && xQueueReceive(commandQueue, &command, 0) == pdTRUE; ++processed) {
     if (command.type == CommandType::SaveWifi) {
@@ -58,6 +65,25 @@ void processCommands() {
     } else if (command.type == CommandType::ClearTarget) {
       targetStore.clearTarget(command.target);
       network.sendAck(command.clientId, command.requestId, true, "Target weight cleared");
+    } else if (command.type == CommandType::BrewStepCue) {
+      const led::CommandResult result = statusLed.startCue(command.cueId, command.pulseCount, command.intervalMs, nowMs);
+      network.sendAck(command.clientId, command.requestId,
+                      result == led::CommandResult::Accepted || result == led::CommandResult::Duplicate,
+                      ledCommandMessage(result, "Brew step cue accepted"));
+    } else if (command.type == CommandType::BrewStepCueCancel) {
+      const led::CommandResult result = statusLed.cancelCue(command.cueId);
+      network.sendAck(command.clientId, command.requestId,
+                      result == led::CommandResult::Accepted || result == led::CommandResult::Duplicate,
+                      ledCommandMessage(result, "Brew step cue cancelled"));
+    } else if (command.type == CommandType::BrewStepActivate) {
+      const led::CommandResult result = statusLed.activateStep(command.transitionId, command.baselineTotalGrams,
+                                                               command.stepTargetGrams, command.cumulativeTargetGrams);
+      network.sendAck(command.clientId, command.requestId,
+                      result == led::CommandResult::Accepted || result == led::CommandResult::Duplicate,
+                      ledCommandMessage(result, "Brew step target activated"));
+    } else if (command.type == CommandType::BrewStepClear) {
+      statusLed.clearStep();
+      network.sendAck(command.clientId, command.requestId, true, "Brew step target cleared");
     } else if (!scales.submit(command)) {
       network.sendAck(command.clientId, command.requestId, false, "Sensor command queue is full");
     }
@@ -168,6 +194,10 @@ void publishTelemetry(uint32_t nowMs, const measurement::MeasurementSnapshot &sn
   measurementObject["lower_alpha"] = snapshot.lowerAlpha;
   measurementObject["upper_tau_s"] = snapshot.upperTauSeconds;
   measurementObject["lower_tau_s"] = snapshot.lowerTauSeconds;
+  const led::CueStatus cue = statusLed.cueStatus();
+  document["led"]["cue_state"] = led::cueStateName(cue.state);
+  document["led"]["cue_id"] = cue.id;
+  document["led"]["cue_pulses_completed"] = cue.pulsesCompleted;
   document["wifi"]["connected"] = network.connected();
   document["wifi"]["provisioning"] = network.accessPointActive();
   document["wifi"]["ssid"] = network.stationSsid();
@@ -196,7 +226,7 @@ void setup() {
   delay(500);
   printBootDiagnostics();
 
-  if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed; static UI will be unavailable");
+  if (!LittleFS.begin(false)) Serial.println("LittleFS mount failed; static UI and shared data will be unavailable");
   else Serial.printf("LittleFS: used=%u total=%u bytes\n", LittleFS.usedBytes(), LittleFS.totalBytes());
 
   scalePreferences.begin("pourframe-scale", false);
@@ -220,11 +250,10 @@ void setup() {
 
 void loop() {
   const uint32_t nowMs = millis();
-  processCommands();
+  processCommands(nowMs);
   processSensorResults();
   const measurement::MeasurementSnapshot snapshot = scales.snapshot(nowMs);
-  const TotalWeightReading totalReading = StatusLed::totalReading(snapshot);
-  statusLed.update(nowMs, totalReading, targetStore.config(TargetId::Total));
+  statusLed.update(nowMs, snapshot, targetStore.config(TargetId::Total));
   network.loop(nowMs);
   if (telemetryLimiter.due(nowMs)) {
     const bool newSnapshot = snapshot.sequence != 0 && snapshot.sequence != lastPublishedMeasurementSequence;

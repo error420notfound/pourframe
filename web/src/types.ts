@@ -1,6 +1,6 @@
 export type ScaleId = 'upper' | 'lower'
 export type TargetId = ScaleId | 'total'
-export type DeviceCommand = 'tare' | 'calibrate' | 'set_target' | 'clear_target'
+export type DeviceCommand = 'tare' | 'calibrate' | 'set_target' | 'clear_target' | 'brew_step_cue' | 'brew_step_cue_cancel' | 'brew_step_activate' | 'brew_step_clear'
 export type LedState = 'normal' | 'approaching' | 'at_target' | 'overweight'
 export type MeasurementState = 'STABLE' | 'ACTIVE' | 'DRAWDOWN' | 'DISTURBED_OR_UNCERTAIN'
 export type PairStatus = 'synchronized' | 'retained_peer' | 'unavailable'
@@ -92,7 +92,19 @@ export interface DeviceTelemetry {
     ip: string
   }
   hostname: string
+  led?: {
+    cue_state: 'idle' | 'active' | 'completed' | 'cancelled' | 'health_aborted' | 'unavailable'
+    cue_id: string
+    cue_pulses_completed: number
+  }
 }
+
+export type DeviceCommandPayload =
+  | { command: 'tare' | 'calibrate' | 'set_target' | 'clear_target'; channel: TargetId; grams?: number }
+  | { command: 'brew_step_cue'; cue_id: string; pulse_count: 5; interval_ms: 1000 }
+  | { command: 'brew_step_cue_cancel'; cue_id: string }
+  | { command: 'brew_step_activate'; transition_id: string; baseline_total_grams: number; step_target_grams: number; cumulative_target_grams: number }
+  | { command: 'brew_step_clear' }
 
 export interface ProtocolAck {
   v: 1

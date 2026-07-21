@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   DeviceCommand,
+  DeviceCommandPayload,
   DeviceTelemetry,
   LedState,
   MeasurementState,
@@ -13,7 +14,7 @@ import type {
   TotalTelemetry,
 } from './types'
 
-type ConnectionState = 'connecting' | 'online' | 'offline'
+export type ConnectionState = 'connecting' | 'online' | 'offline'
 
 interface PendingCommand {
   resolve: (ack: ProtocolAck) => void
@@ -22,12 +23,22 @@ interface PendingCommand {
 }
 
 const mockMode = import.meta.env.DEV && !import.meta.env.VITE_DEVICE_HOST
+const mockScenario = mockMode && typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mock') ?? 'healthy' : 'device'
 const targetToleranceGrams = 0.2
 const approachFraction = 0.9
 
-function usableScale(scale: ScaleTelemetry) {
+export function usableScale(scale: ScaleTelemetry | undefined | null) {
+  if (!scale) return false
   return scale.available && scale.ready && !scale.stale && !scale.disconnected && !scale.calibrating &&
     scale.calibration_valid && !scale.saturated && scale.cadence_valid && Number.isFinite(scale.grams)
+}
+
+export function validTelemetry(message: unknown): message is DeviceTelemetry {
+  if (!message || typeof message !== 'object') return false
+  const value = message as Partial<DeviceTelemetry>
+  return value.v === 1 && value.type === 'telemetry' && typeof value.seq === 'number' &&
+    typeof value.uptime_ms === 'number' && Boolean(value.scales?.upper) && Boolean(value.scales?.lower) &&
+    Boolean(value.total) && Boolean(value.measurement) && typeof value.measurement?.confidence === 'number'
 }
 
 function evaluateTarget(grams: number | null, targetGrams: number | null | undefined) {
@@ -56,6 +67,8 @@ function deriveTotal(scales: Record<ScaleId, ScaleTelemetry>, target: Pick<Total
   const grams = available ? (upperIncluded ? scales.upper.grams : 0) + (lowerIncluded ? scales.lower.grams : 0) : null
   const pair_status = upperIncluded && lowerIncluded ? 'synchronized' : available ? 'retained_peer' : 'unavailable'
   return {
+    target_grams: target.target_grams,
+    target_history_grams: target.target_history_grams,
     grams,
     available,
     partial: upperIncluded !== lowerIncluded,
@@ -66,7 +79,6 @@ function deriveTotal(scales: Record<ScaleId, ScaleTelemetry>, target: Pick<Total
     pour_rate_g_s: Math.max(0, scales.upper.slope_g_s + scales.lower.slope_g_s),
     transfer_residual_g_s: Math.abs(scales.upper.slope_g_s + scales.lower.slope_g_s),
     pair_status,
-    ...target,
     ...evaluateTarget(grams, target.target_grams),
   }
 }
@@ -213,7 +225,7 @@ function mockStateAt(seconds: number): {
 function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTelemetry {
   const seconds = elapsedMs / 1000
   const scenario = mockStateAt(seconds)
-  const lastSampleMs = current.uptime_ms + 125
+  const lastSampleMs = current.uptime_ms + 100
   const scales: Record<ScaleId, ScaleTelemetry> = {
     upper: {
       ...current.scales.upper,
@@ -254,7 +266,7 @@ function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTel
   return {
     ...current,
     seq: current.seq + 1,
-    uptime_ms: current.uptime_ms + 125,
+    uptime_ms: current.uptime_ms + 100,
     scales,
     total,
     measurement: {
@@ -305,23 +317,46 @@ function requestId() {
 }
 
 export function useDevice() {
-  const [telemetry, setTelemetry] = useState<DeviceTelemetry | null>(mockMode ? initialTelemetry : null)
-  const [connection, setConnection] = useState<ConnectionState>(mockMode ? 'online' : 'connecting')
+  const [telemetry, setTelemetry] = useState<DeviceTelemetry | null>(mockMode && mockScenario !== 'disconnected' ? initialTelemetry : null)
+  const [connection, setConnection] = useState<ConnectionState>(mockMode ? (mockScenario === 'disconnected' ? 'offline' : 'online') : 'connecting')
   const [lastUpdateAt, setLastUpdateAt] = useState<number>(mockMode ? Date.now() : 0)
   const [lastCalibration, setLastCalibration] = useState<{ channel: ScaleId; ok: boolean } | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const pendingRef = useRef(new Map<string, PendingCommand>())
   const reconnectAttemptRef = useRef(0)
   const reconnectTimerRef = useRef<number | null>(null)
+  const telemetryTimerRef = useRef<number | null>(null)
+  const mockTaredRef = useRef<Record<ScaleId, boolean>>({ upper: false, lower: false })
 
   useEffect(() => {
-    if (!mockMode) return
+    if (!mockMode || mockScenario === 'disconnected') return
     const startedAt = Date.now()
     const interval = window.setInterval(() => {
       const elapsedMs = Date.now() - startedAt
-      setTelemetry((current) => mockTelemetryAt(elapsedMs, current ?? initialTelemetry))
+      setTelemetry((current) => {
+        const next = mockTelemetryAt(elapsedMs, current ?? initialTelemetry)
+        if (mockScenario === 'partial-upper') {
+          next.scales.upper = { ...next.scales.upper, available: false, ready: false, stale: true, disconnected: true }
+          next.total = deriveTotal(next.scales, next.total)
+        } else if (mockScenario === 'partial-lower') {
+          next.scales.lower = { ...next.scales.lower, available: false, ready: false, stale: true, disconnected: true }
+          next.total = deriveTotal(next.scales, next.total)
+        } else if (mockScenario === 'stale') {
+          next.scales.upper = { ...next.scales.upper, ready: false, stale: true }
+          next.scales.lower = { ...next.scales.lower, ready: false, stale: true }
+          next.total = deriveTotal(next.scales, next.total)
+        } else if (mockScenario === 'uncalibrated') {
+          next.scales.upper = { ...next.scales.upper, calibration_valid: false }
+          next.scales.lower = { ...next.scales.lower, calibration_valid: false }
+          next.total = deriveTotal(next.scales, next.total)
+        }
+        if (mockTaredRef.current.upper) next.scales.upper = { ...next.scales.upper, grams: next.scales.upper.grams - 18.4, calibrated: next.scales.upper.calibrated - 18.4 }
+        if (mockTaredRef.current.lower) next.scales.lower = { ...next.scales.lower, grams: next.scales.lower.grams - 246.8, calibrated: next.scales.lower.calibrated - 246.8 }
+        next.total = deriveTotal(next.scales, next.total)
+        return next
+      })
       setLastUpdateAt(Date.now())
-    }, 125)
+    }, 100)
     return () => window.clearInterval(interval)
   }, [])
 
@@ -337,7 +372,9 @@ export function useDevice() {
 
       socket.addEventListener('open', () => {
         reconnectAttemptRef.current = 0
-        setConnection('online')
+        setConnection('connecting')
+        if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
+        telemetryTimerRef.current = window.setTimeout(() => socket.close(), 3000)
       })
       socket.addEventListener('message', (event) => {
         let message: ProtocolMessage
@@ -347,9 +384,12 @@ export function useDevice() {
           return
         }
         if (message.v !== 1) return
-        if (message.type === 'telemetry') {
+        if (message.type === 'telemetry' && validTelemetry(message)) {
           setTelemetry(message)
           setLastUpdateAt(Date.now())
+          setConnection('online')
+          if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
+          telemetryTimerRef.current = window.setTimeout(() => socket.close(), 3000)
           return
         }
         if (message.type === 'calibration') {
@@ -371,6 +411,8 @@ export function useDevice() {
       })
       socket.addEventListener('close', () => {
         if (disposed) return
+        if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
+        telemetryTimerRef.current = null
         setConnection('offline')
         reconnectAttemptRef.current += 1
         const delay = Math.min(1000 * 2 ** (reconnectAttemptRef.current - 1), 10_000)
@@ -383,6 +425,7 @@ export function useDevice() {
     return () => {
       disposed = true
       if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current)
+      if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
       socketRef.current?.close()
       for (const pending of pendingRef.current.values()) {
         window.clearTimeout(pending.timeout)
@@ -392,17 +435,22 @@ export function useDevice() {
     }
   }, [])
 
-  const sendCommand = useCallback((command: DeviceCommand, channel: TargetId, grams?: number) => {
+  const sendProtocolCommand = useCallback((payload: DeviceCommandPayload) => {
     if (mockMode) {
+      const command = payload.command
+      const channel = 'channel' in payload ? payload.channel : undefined
+      const grams = 'grams' in payload ? payload.grams : undefined
+      if (mockScenario === 'command-failure') return Promise.reject(new Error('Mock device rejected the command'))
       if (command === 'tare') {
-        if (channel === 'total') return Promise.reject(new Error('Total weight cannot be tared directly'))
+        if (!channel || channel === 'total') return Promise.reject(new Error('Total weight cannot be tared directly'))
+        mockTaredRef.current[channel] = true
         setTelemetry((current) => {
           if (!current) return current
           const scales = { ...current.scales, [channel]: { ...current.scales[channel], grams: 0 } }
           return { ...current, scales, total: deriveTotal(scales, current.total) }
         })
       } else if (command === 'calibrate') {
-        if (channel === 'total') return Promise.reject(new Error('Total weight cannot be calibrated directly'))
+        if (!channel || channel === 'total') return Promise.reject(new Error('Total weight cannot be calibrated directly'))
         setTelemetry((current) =>
           current
             ? {
@@ -422,7 +470,7 @@ export function useDevice() {
           )
           setLastCalibration({ channel, ok: true })
         }, 1200)
-      } else if (command === 'set_target' && typeof grams === 'number') {
+      } else if (command === 'set_target' && channel && typeof grams === 'number') {
         const rounded = Math.round(grams * 10) / 10
         setTelemetry((current) => {
           if (!current) return current
@@ -443,7 +491,7 @@ export function useDevice() {
             },
           }
         })
-      } else if (command === 'clear_target') {
+      } else if (command === 'clear_target' && channel) {
         setTelemetry((current) => {
           if (!current) return current
           if (channel === 'total') {
@@ -480,14 +528,18 @@ export function useDevice() {
           v: 1,
           type: 'command',
           id,
-          command,
-          channel,
-          ...(command === 'calibrate' ? { known_grams: grams } : {}),
-          ...(command === 'set_target' ? { target_grams: grams } : {}),
+          ...payload,
+          ...(payload.command === 'calibrate' ? { known_grams: payload.grams } : {}),
+          ...(payload.command === 'set_target' ? { target_grams: payload.grams } : {}),
         }),
       )
     })
   }, [])
+
+  const sendCommand = useCallback((command: DeviceCommand, channel: TargetId, grams?: number) => {
+    if (command !== 'tare' && command !== 'calibrate' && command !== 'set_target' && command !== 'clear_target') return Promise.reject(new Error('Use sendProtocolCommand for brew commands'))
+    return sendProtocolCommand({ command, channel, grams })
+  }, [sendProtocolCommand])
 
   const saveWifi = useCallback(async (ssid: string, password: string) => {
     if (mockMode) {
@@ -505,5 +557,5 @@ export function useDevice() {
     if (!response.ok) throw new Error('The device could not save these Wi-Fi credentials')
   }, [])
 
-  return { telemetry, connection, lastUpdateAt, lastCalibration, sendCommand, saveWifi, mockMode }
+  return { telemetry, connection, lastUpdateAt, lastCalibration, sendCommand, sendProtocolCommand, saveWifi, mockMode, mockScenario }
 }

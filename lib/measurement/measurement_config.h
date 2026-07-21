@@ -9,7 +9,7 @@ namespace config {
 constexpr uint32_t kRevision = 2;
 constexpr float kNominalSampleRateHz = 10.0f;
 constexpr uint64_t kNominalPeriodUs = 100000;
-constexpr uint32_t kPublicationIntervalMs = 125;
+constexpr uint32_t kPublicationIntervalMs = 100;
 constexpr size_t kMedianWindow = 3;
 constexpr size_t kHistoryCapacity = 96;
 constexpr uint64_t kSlopeWindowUs = 320000;

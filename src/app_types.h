@@ -19,6 +19,10 @@ enum class CommandType : uint8_t {
   SetTarget,
   ClearTarget,
   SaveWifi,
+  BrewStepCue,
+  BrewStepCueCancel,
+  BrewStepActivate,
+  BrewStepClear,
 };
 
 struct AppCommand {
@@ -31,6 +35,13 @@ struct AppCommand {
   float targetGrams;
   char ssid[33];
   char password[65];
+  char cueId[97];
+  char transitionId[97];
+  uint8_t pulseCount;
+  uint16_t intervalMs;
+  float baselineTotalGrams;
+  float stepTargetGrams;
+  float cumulativeTargetGrams;
 };
 
 inline const char *scaleIdName(ScaleId scale) {

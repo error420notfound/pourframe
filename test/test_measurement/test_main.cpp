@@ -5,6 +5,7 @@
 
 #include "measurement_pipeline.h"
 #include "sample_pair_assembler.h"
+#include "led_controller.h"
 
 #ifdef PIO_UNIT_TESTING
 #include <unity.h>
@@ -148,14 +149,14 @@ void testTargetedResetAndLongGap() {
 }
 
 void testPublicationLimiterAndNoAveraging() {
-  measurement::PublicationLimiter limiter(125);
+  measurement::PublicationLimiter limiter(100);
   std::vector<uint32_t> publications;
   for (uint32_t now = 0; now <= 1000; ++now) {
     if (limiter.due(now)) publications.push_back(now);
   }
-  expect(publications.size() == 8, "125 ms limiter publishes eight times per second");
+  expect(publications.size() == 10, "100 ms limiter publishes ten times per second");
   for (size_t index = 1; index < publications.size(); ++index) {
-    expect(publications[index] - publications[index - 1] == 125, "publication spacing remains 125 ms");
+    expect(publications[index] - publications[index - 1] == 100, "publication spacing remains 100 ms");
   }
 
   MeasurementPipeline fullRate;
@@ -163,7 +164,7 @@ void testPublicationLimiterAndNoAveraging() {
   fullRate.setCalibration(calibration());
   publishedRate.setCalibration(calibration());
   double latestPublished = 0.0;
-  measurement::PublicationLimiter selectionLimiter(125);
+  measurement::PublicationLimiter selectionLimiter(100);
   for (uint32_t index = 1; index <= 20; ++index) {
     const auto sample = pair(index, static_cast<double>(index), 20.0);
     fullRate.process(sample, 10.0);
@@ -174,6 +175,56 @@ void testPublicationLimiterAndNoAveraging() {
              "publication limiting does not alter filter calculations");
   expectNear(latestPublished, publishedRate.snapshot().upperFiltered, 0.0,
              "publication selects latest snapshot rather than a block average");
+}
+
+void testLedCueStateMachine() {
+  led::Controller controller;
+  led::Color normal{0, 255, 0, 255, false};
+  expect(controller.startCue("brew:bloom:0", 5, 1000, 100, led::Health::Healthy) == led::CommandResult::Accepted,
+         "healthy five-pulse cue is accepted");
+  expect(controller.startCue("brew:bloom:0", 5, 1000, 100, led::Health::Healthy) == led::CommandResult::Duplicate,
+         "duplicate cue id is ignored");
+  for (uint8_t pulse = 0; pulse < 5; ++pulse) {
+    const auto start = controller.update(100 + pulse * 1000, led::Health::Healthy, normal);
+    const auto peak = controller.update(600 + pulse * 1000, led::Health::Healthy, normal);
+    expect(start.cue && start.red == 255 && start.green == 255 && start.blue == 255 && start.brightness == 0,
+           "each neutral-white pulse begins dark");
+    expect(peak.cue && peak.brightness == 255, "each pulse rises smoothly to full envelope brightness");
+  }
+  const auto restored = controller.update(5100, led::Health::Healthy, normal);
+  expect(!restored.cue && restored.green == 255 && controller.cueStatus().pulsesCompleted == 5,
+         "fifth pulse ends at transition and normal target output is restored");
+  expect(controller.cueStatus().state == led::CueState::Completed, "cue lifecycle reports completion");
+
+  expect(controller.startCue("brew:pour-1:0", 5, 1000, 6000, led::Health::Healthy) == led::CommandResult::Accepted,
+         "next unique cue starts");
+  const auto degraded = controller.update(6100, led::Health::Degraded, normal);
+  expect(!degraded.cue && controller.cueStatus().state == led::CueState::HealthAborted,
+         "degraded health aborts white cue and returns target-colored output");
+  expect(controller.startCue("bad", 4, 1000, 7000, led::Health::Healthy) == led::CommandResult::Invalid,
+         "non-five-pulse cue is rejected");
+  expect(controller.startCue("unavailable", 5, 1000, 7000, led::Health::Degraded) == led::CommandResult::Unavailable &&
+             controller.cueStatus().state == led::CueState::Unavailable,
+         "unhealthy cue reports unavailable without showing white");
+  expect(controller.startCue("unavailable", 5, 1000, 7100, led::Health::Healthy) == led::CommandResult::Duplicate,
+         "an unavailable cue id remains idempotently handled after health recovers");
+}
+
+void testLedStepTargetAndCancellation() {
+  led::Controller controller;
+  expect(controller.activateStep("brew:bloom", 0.0, 60.0, 60.0) == led::CommandResult::Accepted,
+         "step target activation is accepted");
+  expect(controller.activateStep("brew:bloom", 0.0, 60.0, 60.0) == led::CommandResult::Duplicate,
+         "duplicate step transition is ignored");
+  expect(controller.stepTarget().active && controller.stepTarget().stepGrams == 60.0,
+         "active step preserves baseline and target");
+  controller.clearStep();
+  expect(!controller.stepTarget().active, "reset clears transient target without changing scale zero");
+  expect(controller.startCue("cancel", 5, 1000, 0, led::Health::Healthy) == led::CommandResult::Accepted,
+         "cancellable cue starts");
+  expect(controller.cancelCue("cancel") == led::CommandResult::Accepted &&
+             controller.cueStatus().state == led::CueState::Cancelled,
+         "pause/reset cancellation stops cue");
 }
 
 void testStateFreshnessTotalAndNoAutoZero() {
@@ -208,6 +259,8 @@ void runAll() {
   testTargetedResetAndLongGap();
   testPublicationLimiterAndNoAveraging();
   testStateFreshnessTotalAndNoAutoZero();
+  testLedCueStateMachine();
+  testLedStepTargetAndCancellation();
 }
 }  // namespace
 

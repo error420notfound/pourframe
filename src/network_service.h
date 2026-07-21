@@ -9,6 +9,7 @@
 #include <WiFi.h>
 
 #include "app_types.h"
+#include "user_data_store.h"
 
 class NetworkService {
  public:
@@ -73,4 +74,6 @@ class NetworkService {
   uint32_t reconnectDelayMs_ = 1000;
   uint32_t lastCleanupMs_ = 0;
   SlowClientState slowClients_[kMaxWebSocketClients]{};
+  UserDataStore userDataStore_;
+  bool userDataReady_ = false;
 };
