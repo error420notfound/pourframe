@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type 
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
 import type { MeasurementTelemetry, ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
 import { useDevice } from './useDevice'
+import { WeightCapture } from './WeightCapture'
 
 interface ScalePanelProps {
   id: ScaleId
@@ -516,6 +517,8 @@ function App() {
         total={total}
         upper={upper}
       />
+
+      <WeightCapture online={online} telemetry={telemetry} />
 
       <div className="scale-grid">
         <ScalePanel

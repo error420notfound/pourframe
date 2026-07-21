@@ -25,6 +25,16 @@ uint64_t dwellFor(MeasurementState state) {
 
 }  // namespace
 
+void applyChannelFreshness(ChannelHealth &health, uint64_t lastSampleUs, uint64_t nowUs, uint32_t staleMs,
+                           uint32_t disconnectedMs) {
+  const bool hasSample = lastSampleUs != 0;
+  const uint64_t ageUs = hasSample && nowUs >= lastSampleUs ? nowUs - lastSampleUs : 0;
+  health.stale = !hasSample || ageUs >= static_cast<uint64_t>(staleMs) * 1000;
+  health.disconnected = !hasSample || ageUs >= static_cast<uint64_t>(disconnectedMs) * 1000;
+  health.available = hasSample && !health.disconnected;
+  health.ready = health.available && !health.stale;
+}
+
 MeasurementPipeline::MeasurementPipeline() { reset(); }
 
 void MeasurementPipeline::setCalibration(const DualScaleCalibration &calibration) {
@@ -64,10 +74,9 @@ bool MeasurementPipeline::configureCrossTalk(DualScaleCalibration &calibration, 
   return true;
 }
 
-double MeasurementPipeline::normalizedAlpha(double alpha80, uint64_t intervalUs) {
-  if (!std::isfinite(alpha80) || alpha80 <= 0.0) return 0.0;
-  if (alpha80 >= 1.0) return 1.0;
-  return 1.0 - std::pow(1.0 - alpha80, static_cast<double>(intervalUs) / config::kNominalPeriodUs);
+double MeasurementPipeline::alphaForTau(double tauSeconds, uint64_t intervalUs) {
+  if (!std::isfinite(tauSeconds) || tauSeconds <= 0.0) return 1.0;
+  return 1.0 - std::exp(-static_cast<double>(intervalUs) / (tauSeconds * 1000000.0));
 }
 
 bool MeasurementPipeline::process(const RawSamplePair &sample, double observedSampleRateHz, uint32_t droppedSamples) {
@@ -75,23 +84,28 @@ bool MeasurementPipeline::process(const RawSamplePair &sample, double observedSa
     return false;
   }
 
-  const uint64_t intervalUs = lastTimestampUs_ == 0 ? config::kNominalPeriodUs : sample.pairTimestampUs - lastTimestampUs_;
-  const bool longGap = lastTimestampUs_ != 0 && intervalUs > config::kFilterResetGapUs;
   lastTimestampUs_ = sample.pairTimestampUs;
 
   snapshot_.sequence = sample.sequence;
   snapshot_.timestampUs = sample.pairTimestampUs;
-  snapshot_.upperRaw = sample.upperRaw;
-  snapshot_.lowerRaw = sample.lowerRaw;
+  if (sample.upperValid) snapshot_.upperRaw = sample.upperRaw;
+  if (sample.lowerValid) snapshot_.lowerRaw = sample.lowerRaw;
   snapshot_.pairSkewUs = sample.pairSkewUs;
+  snapshot_.pairToleranceUs = sample.pairToleranceUs;
   snapshot_.observedSampleRateHz = std::isfinite(observedSampleRateHz) ? observedSampleRateHz : 0.0;
   snapshot_.droppedSamples = droppedSamples;
+  snapshot_.partialSamples = droppedSamples;
+  snapshot_.upperUpdated = false;
+  snapshot_.lowerUpdated = false;
+  snapshot_.upperInnovation = snapshot_.lowerInnovation = 0.0;
+  snapshot_.upperAlpha = snapshot_.lowerAlpha = 0.0;
+  snapshot_.upperTauSeconds = snapshot_.lowerTauSeconds = config::kNormalTauSeconds;
 
   const bool rawValid[2] = {sample.upperValid && adcValid(sample.upperRaw), sample.lowerValid && adcValid(sample.lowerRaw)};
   snapshot_.upperHealth.available = sample.upperValid;
   snapshot_.lowerHealth.available = sample.lowerValid;
-  snapshot_.upperHealth.saturated = sample.upperValid && !adcValid(sample.upperRaw);
-  snapshot_.lowerHealth.saturated = sample.lowerValid && !adcValid(sample.lowerRaw);
+  if (sample.upperValid) snapshot_.upperHealth.saturated = !adcValid(sample.upperRaw);
+  if (sample.lowerValid) snapshot_.lowerHealth.saturated = !adcValid(sample.lowerRaw);
   snapshot_.upperHealth.calibrated = calibrationValidFor(0);
   snapshot_.lowerHealth.calibrated = calibrationValidFor(1);
   const bool cadenceValid = observedSampleRateHz >= 8.0 && observedSampleRateHz <= 82.0;
@@ -100,6 +114,18 @@ bool MeasurementPipeline::process(const RawSamplePair &sample, double observedSa
   snapshot_.upperHealth.ready = rawValid[0];
   snapshot_.lowerHealth.ready = rawValid[1];
 
+  const uint64_t sampleTimestamps[2] = {sample.upperReadTimestampUs, sample.lowerReadTimestampUs};
+  const bool longGap[2] = {
+      lastFilterSampleUs_[0] != 0 && sampleTimestamps[0] > lastFilterSampleUs_[0] &&
+          sampleTimestamps[0] - lastFilterSampleUs_[0] > config::kFilterResetGapUs,
+      lastFilterSampleUs_[1] != 0 && sampleTimestamps[1] > lastFilterSampleUs_[1] &&
+          sampleTimestamps[1] - lastFilterSampleUs_[1] > config::kFilterResetGapUs,
+  };
+  if (rawValid[0]) snapshot_.upperLastSampleUs = sample.upperReadTimestampUs;
+  if (rawValid[1]) snapshot_.lowerLastSampleUs = sample.lowerReadTimestampUs;
+
+  if (rawValid[0] && longGap[0]) medians_[0] = {};
+  if (rawValid[1] && longGap[1]) medians_[1] = {};
   if (rawValid[0]) snapshot_.upperMedianRaw = updateMedian(medians_[0], sample.upperRaw);
   if (rawValid[1]) snapshot_.lowerMedianRaw = updateMedian(medians_[1], sample.lowerRaw);
 
@@ -112,9 +138,9 @@ bool MeasurementPipeline::process(const RawSamplePair &sample, double observedSa
     calibrated[1] = (static_cast<double>(snapshot_.lowerMedianRaw) - calibration_.zeroOffsetCounts[1]) /
                     calibration_.countsPerGram[1];
   }
-  const bool bothCalibratedValid = rawValid[0] && rawValid[1] && calibrationValidFor(0) && calibrationValidFor(1) &&
-                                   std::isfinite(calibrated[0]) && std::isfinite(calibrated[1]);
-  if (bothCalibratedValid && calibration_.crossTalkEnabled) {
+  const bool bothRawCalibrated = rawValid[0] && rawValid[1] && calibrationValidFor(0) && calibrationValidFor(1) &&
+                                 std::isfinite(calibrated[0]) && std::isfinite(calibrated[1]);
+  if (bothRawCalibrated && calibration_.crossTalkEnabled) {
     const double upper = calibration_.inverseMatrix[0][0] * calibrated[0] + calibration_.inverseMatrix[0][1] * calibrated[1];
     const double lower = calibration_.inverseMatrix[1][0] * calibrated[0] + calibration_.inverseMatrix[1][1] * calibrated[1];
     calibrated[0] = upper;
@@ -122,41 +148,63 @@ bool MeasurementPipeline::process(const RawSamplePair &sample, double observedSa
   }
   snapshot_.upperCalibrated = calibrated[0];
   snapshot_.lowerCalibrated = calibrated[1];
-  snapshot_.pairValid = bothCalibratedValid && sample.pairSkewUs <= config::kPairSkewWarningUs && cadenceValid;
+  const bool canUpdate[2] = {
+      rawValid[0] && calibrationValidFor(0) && std::isfinite(calibrated[0]) &&
+          (!calibration_.crossTalkEnabled || bothRawCalibrated),
+      rawValid[1] && calibrationValidFor(1) && std::isfinite(calibrated[1]) &&
+          (!calibration_.crossTalkEnabled || bothRawCalibrated),
+  };
+  double *filtered[2] = {&snapshot_.upperFiltered, &snapshot_.lowerFiltered};
+  double *innovations[2] = {&snapshot_.upperInnovation, &snapshot_.lowerInnovation};
+  double *alphas[2] = {&snapshot_.upperAlpha, &snapshot_.lowerAlpha};
+  bool *updated[2] = {&snapshot_.upperUpdated, &snapshot_.lowerUpdated};
+  for (uint8_t channel = 0; channel < 2; ++channel) {
+    if (!canUpdate[channel]) continue;
+    const uint64_t timestampUs = sampleTimestamps[channel];
+    *innovations[channel] = emaInitialized_[channel] ? std::fabs(calibrated[channel] - *filtered[channel]) : 0.0;
+    if (!emaInitialized_[channel] || longGap[channel] || timestampUs <= lastFilterSampleUs_[channel]) {
+      *filtered[channel] = calibrated[channel];
+      *alphas[channel] = 1.0;
+      emaInitialized_[channel] = true;
+    } else {
+      const uint64_t intervalUs = timestampUs - lastFilterSampleUs_[channel];
+      *alphas[channel] = alphaForTau(config::kNormalTauSeconds, intervalUs);
+      *filtered[channel] += *alphas[channel] * (calibrated[channel] - *filtered[channel]);
+    }
+    lastFilterSampleUs_[channel] = timestampUs;
+    *updated[channel] = true;
+  }
+  snapshot_.selectedAlpha = std::max(snapshot_.upperAlpha, snapshot_.lowerAlpha);
+  snapshot_.totalFiltered = (emaInitialized_[0] ? snapshot_.upperFiltered : 0.0) +
+                            (emaInitialized_[1] ? snapshot_.lowerFiltered : 0.0);
 
-  if (bothCalibratedValid) {
+  const uint32_t toleranceUs = sample.pairToleranceUs == 0 ? config::kInitialPairToleranceUs : sample.pairToleranceUs;
+  snapshot_.pairValid = snapshot_.upperUpdated && snapshot_.lowerUpdated &&
+                        sample.pairSkewUs <= toleranceUs && cadenceValid;
+  if (snapshot_.pairValid) {
+    snapshot_.pairStatus = PairStatus::Synchronized;
+  } else if ((snapshot_.upperUpdated && emaInitialized_[1]) || (snapshot_.lowerUpdated && emaInitialized_[0])) {
+    snapshot_.pairStatus = PairStatus::RetainedPeer;
+  } else {
+    snapshot_.pairStatus = PairStatus::Unavailable;
+  }
+
+  if (snapshot_.pairValid) {
     HistoryPoint point{};
     point.timestampUs = sample.pairTimestampUs;
-    point.upperCalibrated = calibrated[0];
-    point.lowerCalibrated = calibrated[1];
-    point.totalCalibrated = calibrated[0] + calibrated[1];
+    point.upperCalibrated = snapshot_.upperFiltered;
+    point.lowerCalibrated = snapshot_.lowerFiltered;
+    point.totalCalibrated = snapshot_.totalFiltered;
     appendHistory(point);
     computeWindowStats(sample.pairTimestampUs);
-  } else {
-    snapshot_.upperSlopeGps = snapshot_.lowerSlopeGps = snapshot_.totalSlopeGps = 0.0;
-    snapshot_.upperRangeGrams = snapshot_.lowerRangeGrams = snapshot_.totalRangeGrams = 0.0;
   }
   snapshot_.transferResidualGps = std::fabs(snapshot_.upperSlopeGps + snapshot_.lowerSlopeGps);
 
-  const bool immediateFault = !bothCalibratedValid || !cadenceValid || sample.pairSkewUs > config::kPairSkewWarningUs;
+  const bool immediateFault = !snapshot_.pairValid;
   const MeasurementState candidate = classifyCandidate(!immediateFault);
   snapshot_.candidateState = candidate;
   updateCommittedState(candidate, sample.pairTimestampUs, immediateFault);
 
-  const double alpha80 = alphaFor(candidate);
-  snapshot_.selectedAlpha = longGap ? 1.0 : normalizedAlpha(alpha80, intervalUs);
-  double *filtered[2] = {&snapshot_.upperFiltered, &snapshot_.lowerFiltered};
-  for (uint8_t channel = 0; channel < 2; ++channel) {
-    if (!rawValid[channel] || !calibrationValidFor(channel) || !std::isfinite(calibrated[channel])) continue;
-    if (!emaInitialized_[channel] || longGap) {
-      *filtered[channel] = calibrated[channel];
-      emaInitialized_[channel] = true;
-    } else {
-      *filtered[channel] += snapshot_.selectedAlpha * (calibrated[channel] - *filtered[channel]);
-    }
-  }
-  snapshot_.totalFiltered = (emaInitialized_[0] ? snapshot_.upperFiltered : 0.0) +
-                            (emaInitialized_[1] ? snapshot_.lowerFiltered : 0.0);
   updateConfidence(!immediateFault);
   snapshot_.isStable = snapshot_.state == MeasurementState::Stable && snapshot_.pairValid &&
                        snapshot_.confidence >= config::kStableConfidenceThreshold;
@@ -174,6 +222,7 @@ void MeasurementPipeline::reset() {
   historyStart_ = 0;
   historyCount_ = 0;
   lastTimestampUs_ = 0;
+  lastFilterSampleUs_[0] = lastFilterSampleUs_[1] = 0;
   candidateSinceUs_ = 0;
   trackedCandidate_ = MeasurementState::DisturbedOrUncertain;
   emaInitialized_[0] = false;
@@ -191,8 +240,20 @@ void MeasurementPipeline::resetAfterTare(uint8_t channel, int32_t medianRaw) {
   snapshot_.candidateState = MeasurementState::DisturbedOrUncertain;
   snapshot_.confidence = 0.0;
   snapshot_.isStable = false;
-  emaInitialized_[0] = false;
-  emaInitialized_[1] = false;
+  resetChannelFilter(channel);
+}
+
+void MeasurementPipeline::resetChannelFilter(uint8_t channel) {
+  if (channel > 1) return;
+  emaInitialized_[channel] = false;
+  lastFilterSampleUs_[channel] = 0;
+  if (channel == 0) {
+    snapshot_.upperAlpha = 0.0;
+    snapshot_.upperInnovation = 0.0;
+  } else {
+    snapshot_.lowerAlpha = 0.0;
+    snapshot_.lowerInnovation = 0.0;
+  }
 }
 
 int32_t MeasurementPipeline::updateMedian(MedianState &state, int32_t value) {
@@ -309,32 +370,21 @@ void MeasurementPipeline::updateCommittedState(MeasurementState candidate, uint6
   if (promptStableExit || timestampUs - candidateSinceUs_ >= dwellFor(candidate)) snapshot_.state = candidate;
 }
 
-double MeasurementPipeline::alphaFor(MeasurementState state) const {
-  switch (state) {
-    case MeasurementState::Stable:
-      return config::kStableAlpha80;
-    case MeasurementState::Active:
-      return config::kActiveAlpha80;
-    case MeasurementState::Drawdown:
-      return config::kDrawdownAlpha80;
-    default:
-      return config::kDisturbedAlpha80;
-  }
-}
-
 void MeasurementPipeline::updateConfidence(bool completeAndValid) {
   if (!completeAndValid || !snapshot_.pairValid) {
     snapshot_.confidence = 0.0;
     const bool upperUsable = snapshot_.upperHealth.calibrated && snapshot_.upperHealth.ready;
     const bool lowerUsable = snapshot_.lowerHealth.calibrated && snapshot_.lowerHealth.ready;
-    const bool missingPeer = (!snapshot_.upperHealth.available || !snapshot_.lowerHealth.available);
-    if (missingPeer && upperUsable != lowerUsable) {
+    const bool oneChannelUpdated = snapshot_.upperUpdated != snapshot_.lowerUpdated;
+    if (oneChannelUpdated && (upperUsable || lowerUsable)) {
       snapshot_.confidence = config::kPartialConfidenceCap;
     }
     return;
   }
   double confidence = 1.0;
-  confidence *= 1.0 - 0.25 * clamp01(static_cast<double>(snapshot_.pairSkewUs) / config::kPairSkewWarningUs);
+  const uint32_t toleranceUs = snapshot_.pairToleranceUs == 0 ? config::kInitialPairToleranceUs
+                                                               : snapshot_.pairToleranceUs;
+  confidence *= 1.0 - 0.25 * clamp01(static_cast<double>(snapshot_.pairSkewUs) / toleranceUs);
   if (snapshot_.state == MeasurementState::Stable) {
     confidence *= 1.0 - 0.3 * clamp01(std::fabs(snapshot_.totalSlopeGps) / config::kStableTotalSlopeGps);
     confidence *= 1.0 - 0.2 * clamp01(snapshot_.totalRangeGrams / config::kStableTotalRangeGrams);

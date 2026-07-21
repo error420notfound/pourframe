@@ -12,7 +12,7 @@
 
 class NetworkService {
  public:
-  static constexpr size_t kMaxOutputPayload = 2048;
+  static constexpr size_t kMaxOutputPayload = 3072;
 
   NetworkService();
 

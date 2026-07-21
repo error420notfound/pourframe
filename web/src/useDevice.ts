@@ -54,6 +54,7 @@ function deriveTotal(scales: Record<ScaleId, ScaleTelemetry>, target: Pick<Total
   const lowerIncluded = usableScale(scales.lower)
   const available = upperIncluded || lowerIncluded
   const grams = available ? (upperIncluded ? scales.upper.grams : 0) + (lowerIncluded ? scales.lower.grams : 0) : null
+  const pair_status = upperIncluded && lowerIncluded ? 'synchronized' : available ? 'retained_peer' : 'unavailable'
   return {
     grams,
     available,
@@ -61,8 +62,10 @@ function deriveTotal(scales: Record<ScaleId, ScaleTelemetry>, target: Pick<Total
     upper_included: upperIncluded,
     lower_included: lowerIncluded,
     slope_g_s: scales.upper.slope_g_s + scales.lower.slope_g_s,
+    range_g: Math.max(scales.upper.range_g, scales.lower.range_g),
     pour_rate_g_s: Math.max(0, scales.upper.slope_g_s + scales.lower.slope_g_s),
     transfer_residual_g_s: Math.abs(scales.upper.slope_g_s + scales.lower.slope_g_s),
+    pair_status,
     ...target,
     ...evaluateTarget(grams, target.target_grams),
   }
@@ -82,25 +85,43 @@ const initialTelemetry: DeviceTelemetry = {
     upper_included: true,
     lower_included: true,
     slope_g_s: 0,
+    range_g: 0.12,
     pour_rate_g_s: 0,
     transfer_residual_g_s: 0,
+    pair_status: 'synchronized',
     target_grams: 270,
     target_history_grams: [270, 300, 250],
     led_state: 'approaching',
     led_proximity: 0.81,
   },
   measurement: {
+    seq: 1200,
+    new_snapshot: true,
     sample_timestamp_ms: 119_920,
+    upper_sample_timestamp_ms: 119_920,
+    lower_sample_timestamp_ms: 119_920,
     state: 'STABLE',
     candidate_state: 'STABLE',
     is_stable: true,
     confidence: 0.94,
-    alpha: 0.06,
-    sample_rate_hz: 80,
-    upper_sample_rate_hz: 80,
-    lower_sample_rate_hz: 80,
+    alpha: 0.329679954,
+    sample_rate_hz: 10,
+    upper_sample_rate_hz: 10,
+    lower_sample_rate_hz: 10,
     pair_skew_us: 220,
+    pair_tolerance_us: 60_000,
+    pair_valid: true,
+    pair_status: 'synchronized',
     dropped_samples: 0,
+    partial_samples: 0,
+    upper_updated: true,
+    lower_updated: true,
+    upper_innovation_g: 0.01,
+    lower_innovation_g: 0.01,
+    upper_alpha: 0.329679954,
+    lower_alpha: 0.329679954,
+    upper_tau_s: 0.25,
+    lower_tau_s: 0.25,
   },
   scales: {
     upper: {
@@ -108,6 +129,10 @@ const initialTelemetry: DeviceTelemetry = {
       grams: 18.4,
       median_raw: 128_442,
       calibrated: 18.4,
+      innovation_g: 0.01,
+      filter_alpha: 0.329679954,
+      filter_tau_s: 0.25,
+      updated: true,
       slope_g_s: 0,
       range_g: 0.08,
       available: true,
@@ -127,6 +152,10 @@ const initialTelemetry: DeviceTelemetry = {
       grams: 246.8,
       median_raw: 892_031,
       calibrated: 246.8,
+      innovation_g: 0.01,
+      filter_alpha: 0.329679954,
+      filter_tau_s: 0.25,
+      updated: true,
       slope_g_s: 0,
       range_g: 0.09,
       available: true,
@@ -184,13 +213,17 @@ function mockStateAt(seconds: number): {
 function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTelemetry {
   const seconds = elapsedMs / 1000
   const scenario = mockStateAt(seconds)
-  const lastSampleMs = current.uptime_ms + 50
+  const lastSampleMs = current.uptime_ms + 125
   const scales: Record<ScaleId, ScaleTelemetry> = {
     upper: {
       ...current.scales.upper,
       raw: Math.round(128_442 + (scenario.upper - 18.4) * 1024),
       median_raw: Math.round(128_442 + (scenario.upper - 18.4) * 1024),
       calibrated: scenario.upper,
+      innovation_g: Math.abs(scenario.upper - current.scales.upper.grams),
+      filter_alpha: 0.329679954,
+      filter_tau_s: 0.25,
+      updated: true,
       grams: scenario.upper,
       slope_g_s: scenario.upperSlope,
       range_g: scenario.state === 'STABLE' ? 0.08 : 0.7,
@@ -201,6 +234,10 @@ function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTel
       raw: Math.round(892_031 + (scenario.lower - 246.8) * 980),
       median_raw: Math.round(892_031 + (scenario.lower - 246.8) * 980),
       calibrated: scenario.lower,
+      innovation_g: Math.abs(scenario.lower - current.scales.lower.grams),
+      filter_alpha: scenario.lowerFault ? 0 : 0.329679954,
+      filter_tau_s: 0.25,
+      updated: !scenario.lowerFault,
       grams: scenario.lower,
       slope_g_s: scenario.lowerSlope,
       range_g: scenario.state === 'STABLE' ? 0.09 : 0.8,
@@ -213,24 +250,41 @@ function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTel
   }
   const total = deriveTotal(scales, current.total)
   total.transfer_residual_g_s = Math.abs(scenario.upperSlope + scenario.lowerSlope)
+  total.pair_status = scenario.lowerFault ? 'retained_peer' : 'synchronized'
   return {
     ...current,
     seq: current.seq + 1,
-    uptime_ms: current.uptime_ms + 50,
+    uptime_ms: current.uptime_ms + 125,
     scales,
     total,
     measurement: {
+      seq: current.measurement.seq + 1,
+      new_snapshot: true,
       sample_timestamp_ms: lastSampleMs,
+      upper_sample_timestamp_ms: lastSampleMs,
+      lower_sample_timestamp_ms: scenario.lowerFault ? current.measurement.lower_sample_timestamp_ms : lastSampleMs,
       state: scenario.state,
       candidate_state: scenario.state,
       is_stable: scenario.state === 'STABLE' && scenario.confidence >= 0.8,
       confidence: scenario.confidence,
-      alpha: scenario.state === 'ACTIVE' ? 0.21 : scenario.state === 'DRAWDOWN' ? 0.11 : 0.06,
-      sample_rate_hz: 80,
-      upper_sample_rate_hz: 80,
-      lower_sample_rate_hz: scenario.lowerFault ? 0 : 80,
-      pair_skew_us: scenario.lowerFault ? 30_000 : 180 + Math.round(Math.abs(Math.sin(seconds)) * 100),
+      alpha: 0.329679954,
+      sample_rate_hz: 10,
+      upper_sample_rate_hz: 10,
+      lower_sample_rate_hz: scenario.lowerFault ? 0 : 10,
+      pair_skew_us: scenario.lowerFault ? 60_000 : 180 + Math.round(Math.abs(Math.sin(seconds)) * 100),
+      pair_tolerance_us: 60_000,
+      pair_valid: !scenario.lowerFault,
+      pair_status: scenario.lowerFault ? 'retained_peer' : 'synchronized',
       dropped_samples: scenario.lowerFault ? current.measurement.dropped_samples + 1 : current.measurement.dropped_samples,
+      partial_samples: scenario.lowerFault ? current.measurement.partial_samples + 1 : current.measurement.partial_samples,
+      upper_updated: true,
+      lower_updated: !scenario.lowerFault,
+      upper_innovation_g: scales.upper.innovation_g,
+      lower_innovation_g: scales.lower.innovation_g,
+      upper_alpha: scales.upper.filter_alpha,
+      lower_alpha: scales.lower.filter_alpha,
+      upper_tau_s: 0.25,
+      lower_tau_s: 0.25,
     },
   }
 }
@@ -267,7 +321,7 @@ export function useDevice() {
       const elapsedMs = Date.now() - startedAt
       setTelemetry((current) => mockTelemetryAt(elapsedMs, current ?? initialTelemetry))
       setLastUpdateAt(Date.now())
-    }, 50)
+    }, 125)
     return () => window.clearInterval(interval)
   }, [])
 

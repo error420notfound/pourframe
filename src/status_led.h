@@ -22,7 +22,7 @@ struct TargetLedEvaluation {
 };
 
 struct TotalWeightReading {
-  float grams = 0.0f;
+  double grams = 0.0;
   bool available = false;
   bool partial = false;
   bool upperIncluded = false;

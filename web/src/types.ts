@@ -3,12 +3,17 @@ export type TargetId = ScaleId | 'total'
 export type DeviceCommand = 'tare' | 'calibrate' | 'set_target' | 'clear_target'
 export type LedState = 'normal' | 'approaching' | 'at_target' | 'overweight'
 export type MeasurementState = 'STABLE' | 'ACTIVE' | 'DRAWDOWN' | 'DISTURBED_OR_UNCERTAIN'
+export type PairStatus = 'synchronized' | 'retained_peer' | 'unavailable'
 
 export interface ScaleTelemetry {
   raw: number
   grams: number
   median_raw: number
   calibrated: number
+  innovation_g: number
+  filter_alpha: number
+  filter_tau_s: number
+  updated: boolean
   slope_g_s: number
   range_g: number
   available: boolean
@@ -31,8 +36,10 @@ export interface TotalTelemetry {
   upper_included: boolean
   lower_included: boolean
   slope_g_s: number
+  range_g: number
   pour_rate_g_s: number
   transfer_residual_g_s: number
+  pair_status: PairStatus
   target_grams?: number | null
   target_history_grams?: number[]
   led_state: LedState
@@ -40,7 +47,11 @@ export interface TotalTelemetry {
 }
 
 export interface MeasurementTelemetry {
+  seq: number
+  new_snapshot: boolean
   sample_timestamp_ms: number
+  upper_sample_timestamp_ms: number
+  lower_sample_timestamp_ms: number
   state: MeasurementState
   candidate_state: MeasurementState
   is_stable: boolean
@@ -50,7 +61,19 @@ export interface MeasurementTelemetry {
   upper_sample_rate_hz: number
   lower_sample_rate_hz: number
   pair_skew_us: number
+  pair_tolerance_us: number
+  pair_valid: boolean
+  pair_status: PairStatus
   dropped_samples: number
+  partial_samples: number
+  upper_updated: boolean
+  lower_updated: boolean
+  upper_innovation_g: number
+  lower_innovation_g: number
+  upper_alpha: number
+  lower_alpha: number
+  upper_tau_s: number
+  lower_tau_s: number
 }
 
 export interface DeviceTelemetry {

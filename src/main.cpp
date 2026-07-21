@@ -5,6 +5,7 @@
 #include <esp_system.h>
 
 #include <measurement_config.h>
+#include <sample_pair_assembler.h>
 #include <measurement_types.h>
 
 #include "app_types.h"
@@ -28,7 +29,8 @@ TargetStore targetStore;
 StatusLed statusLed;
 QueueHandle_t commandQueue = nullptr;
 uint32_t telemetrySequence = 0;
-uint32_t lastTelemetryMs = 0;
+uint32_t lastPublishedMeasurementSequence = 0;
+measurement::PublicationLimiter telemetryLimiter;
 
 void printBootDiagnostics() {
   Serial.println("\nPourframe dual-scale controller");
@@ -89,6 +91,10 @@ void addScaleTelemetry(JsonObject object, bool upper, const measurement::Measure
   object["median_raw"] = upper ? snapshot.upperMedianRaw : snapshot.lowerMedianRaw;
   object["grams"] = upper ? snapshot.upperFiltered : snapshot.lowerFiltered;
   object["calibrated"] = upper ? snapshot.upperCalibrated : snapshot.lowerCalibrated;
+  object["innovation_g"] = upper ? snapshot.upperInnovation : snapshot.lowerInnovation;
+  object["filter_alpha"] = upper ? snapshot.upperAlpha : snapshot.lowerAlpha;
+  object["filter_tau_s"] = upper ? snapshot.upperTauSeconds : snapshot.lowerTauSeconds;
+  object["updated"] = upper ? snapshot.upperUpdated : snapshot.lowerUpdated;
   object["slope_g_s"] = upper ? snapshot.upperSlopeGps : snapshot.lowerSlopeGps;
   object["range_g"] = upper ? snapshot.upperRangeGrams : snapshot.lowerRangeGrams;
   object["available"] = health.available;
@@ -112,15 +118,17 @@ void addTotalTelemetry(JsonObject object, const measurement::MeasurementSnapshot
   object["upper_included"] = reading.upperIncluded;
   object["lower_included"] = reading.lowerIncluded;
   object["slope_g_s"] = snapshot.totalSlopeGps;
+  object["range_g"] = snapshot.totalRangeGrams;
   object["pour_rate_g_s"] = snapshot.totalSlopeGps > 0.0 ? snapshot.totalSlopeGps : 0.0;
   object["transfer_residual_g_s"] = snapshot.transferResidualGps;
+  object["pair_status"] = measurement::pairStatusName(snapshot.pairStatus);
   addTargetTelemetry(object, target);
   const TargetLedEvaluation evaluation = StatusLed::evaluate(reading, target);
   object["led_state"] = StatusLed::stateName(evaluation.state);
   object["led_proximity"] = evaluation.proximity;
 }
 
-void publishTelemetry(uint32_t nowMs, const measurement::MeasurementSnapshot &snapshot) {
+void publishTelemetry(uint32_t nowMs, const measurement::MeasurementSnapshot &snapshot, bool newSnapshot) {
   JsonDocument document;
   document["v"] = POURFRAME_PROTOCOL_VERSION;
   document["type"] = "telemetry";
@@ -133,7 +141,11 @@ void publishTelemetry(uint32_t nowMs, const measurement::MeasurementSnapshot &sn
                     targetStore.config(TargetId::Lower));
   addTotalTelemetry(document["total"].to<JsonObject>(), snapshot, totalReading, targetStore.config(TargetId::Total));
   JsonObject measurementObject = document["measurement"].to<JsonObject>();
+  measurementObject["seq"] = snapshot.sequence;
+  measurementObject["new_snapshot"] = newSnapshot;
   measurementObject["sample_timestamp_ms"] = snapshot.timestampUs / 1000;
+  measurementObject["upper_sample_timestamp_ms"] = snapshot.upperLastSampleUs / 1000;
+  measurementObject["lower_sample_timestamp_ms"] = snapshot.lowerLastSampleUs / 1000;
   measurementObject["state"] = measurement::stateName(snapshot.state);
   measurementObject["candidate_state"] = measurement::stateName(snapshot.candidateState);
   measurementObject["is_stable"] = snapshot.isStable;
@@ -143,7 +155,19 @@ void publishTelemetry(uint32_t nowMs, const measurement::MeasurementSnapshot &sn
   measurementObject["upper_sample_rate_hz"] = snapshot.upperSampleRateHz;
   measurementObject["lower_sample_rate_hz"] = snapshot.lowerSampleRateHz;
   measurementObject["pair_skew_us"] = snapshot.pairSkewUs;
+  measurementObject["pair_tolerance_us"] = snapshot.pairToleranceUs;
+  measurementObject["pair_valid"] = snapshot.pairValid;
+  measurementObject["pair_status"] = measurement::pairStatusName(snapshot.pairStatus);
   measurementObject["dropped_samples"] = snapshot.droppedSamples;
+  measurementObject["partial_samples"] = snapshot.partialSamples;
+  measurementObject["upper_updated"] = snapshot.upperUpdated;
+  measurementObject["lower_updated"] = snapshot.lowerUpdated;
+  measurementObject["upper_innovation_g"] = snapshot.upperInnovation;
+  measurementObject["lower_innovation_g"] = snapshot.lowerInnovation;
+  measurementObject["upper_alpha"] = snapshot.upperAlpha;
+  measurementObject["lower_alpha"] = snapshot.lowerAlpha;
+  measurementObject["upper_tau_s"] = snapshot.upperTauSeconds;
+  measurementObject["lower_tau_s"] = snapshot.lowerTauSeconds;
   document["wifi"]["connected"] = network.connected();
   document["wifi"]["provisioning"] = network.accessPointActive();
   document["wifi"]["ssid"] = network.stationSsid();
@@ -202,9 +226,10 @@ void loop() {
   const TotalWeightReading totalReading = StatusLed::totalReading(snapshot);
   statusLed.update(nowMs, totalReading, targetStore.config(TargetId::Total));
   network.loop(nowMs);
-  if (nowMs - lastTelemetryMs >= measurement::config::kPublicationIntervalMs) {
-    lastTelemetryMs = nowMs;
-    publishTelemetry(nowMs, snapshot);
+  if (telemetryLimiter.due(nowMs)) {
+    const bool newSnapshot = snapshot.sequence != 0 && snapshot.sequence != lastPublishedMeasurementSequence;
+    publishTelemetry(nowMs, snapshot, newSnapshot);
+    if (newSnapshot) lastPublishedMeasurementSequence = snapshot.sequence;
   }
   delay(1);
 }

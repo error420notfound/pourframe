@@ -51,10 +51,10 @@ TotalWeightReading StatusLed::totalReading(const measurement::MeasurementSnapsho
   reading.upperIncluded = usableReading(snapshot.upperHealth, snapshot.upperFiltered);
   reading.lowerIncluded = usableReading(snapshot.lowerHealth, snapshot.lowerFiltered);
   if (reading.upperIncluded) {
-    reading.grams += static_cast<float>(snapshot.upperFiltered);
+    reading.grams += snapshot.upperFiltered;
   }
   if (reading.lowerIncluded) {
-    reading.grams += static_cast<float>(snapshot.lowerFiltered);
+    reading.grams += snapshot.lowerFiltered;
   }
   reading.available = reading.upperIncluded || reading.lowerIncluded;
   reading.partial = reading.upperIncluded != reading.lowerIncluded;
@@ -67,11 +67,11 @@ TargetLedEvaluation StatusLed::evaluate(const TotalWeightReading &reading, const
   }
 
   const float targetGrams = target.activeGrams();
-  const float difference = reading.grams - targetGrams;
+  const double difference = reading.grams - targetGrams;
   if (difference > kTargetToleranceGrams) {
     return {TargetLedState::Overweight, 1.0f};
   }
-  if (fabsf(difference) <= kTargetToleranceGrams) {
+  if (std::fabs(difference) <= kTargetToleranceGrams) {
     return {TargetLedState::AtTarget, 1.0f};
   }
 

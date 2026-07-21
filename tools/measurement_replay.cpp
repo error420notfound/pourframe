@@ -23,6 +23,7 @@ bool parseLine(const std::string &line, measurement::RawSamplePair &sample) {
     sample.upperValid = std::stoi(fields[4]) != 0;
     sample.lowerValid = std::stoi(fields[5]) != 0;
     sample.pairSkewUs = static_cast<uint32_t>(std::stoul(fields[6]));
+    sample.pairToleranceUs = measurement::config::kInitialPairToleranceUs;
     sample.upperReadTimestampUs = sample.pairTimestampUs - sample.pairSkewUs / 2;
     sample.lowerReadTimestampUs = sample.pairTimestampUs + sample.pairSkewUs / 2;
     return true;
@@ -56,7 +57,9 @@ int main(int argc, char **argv) {
   output << "timestamp_us,sequence,upper_raw,lower_raw,upper_median,lower_median,upper_calibrated,lower_calibrated,"
             "upper_filtered,lower_filtered,total_filtered,upper_slope_g_s,lower_slope_g_s,total_slope_g_s,"
             "upper_range_g,lower_range_g,total_range_g,state,candidate_state,alpha,residual_g_s,confidence,"
-            "sample_rate_hz,pair_skew_us,pair_valid\n";
+            "sample_rate_hz,pair_skew_us,pair_tolerance_us,pair_valid,pair_status,upper_sample_timestamp_us,"
+            "lower_sample_timestamp_us,upper_innovation_g,lower_innovation_g,upper_alpha,lower_alpha,upper_tau_s,"
+            "lower_tau_s,upper_updated,lower_updated,partial_samples,dropped_samples\n";
   std::string line;
   std::getline(input, line);  // documented input header
   uint64_t previousTimestamp = 0;
@@ -75,6 +78,10 @@ int main(int argc, char **argv) {
            << s.lowerSlopeGps << ',' << s.totalSlopeGps << ',' << s.upperRangeGrams << ',' << s.lowerRangeGrams << ','
            << s.totalRangeGrams << ',' << measurement::stateName(s.state) << ',' << measurement::stateName(s.candidateState)
            << ',' << s.selectedAlpha << ',' << s.transferResidualGps << ',' << s.confidence << ',' << s.observedSampleRateHz
-           << ',' << s.pairSkewUs << ',' << (s.pairValid ? 1 : 0) << '\n';
+           << ',' << s.pairSkewUs << ',' << s.pairToleranceUs << ',' << (s.pairValid ? 1 : 0) << ','
+           << measurement::pairStatusName(s.pairStatus) << ',' << s.upperLastSampleUs << ',' << s.lowerLastSampleUs << ','
+           << s.upperInnovation << ',' << s.lowerInnovation << ',' << s.upperAlpha << ',' << s.lowerAlpha << ','
+           << s.upperTauSeconds << ',' << s.lowerTauSeconds << ',' << (s.upperUpdated ? 1 : 0) << ','
+           << (s.lowerUpdated ? 1 : 0) << ',' << s.partialSamples << ',' << s.droppedSamples << '\n';
   }
 }

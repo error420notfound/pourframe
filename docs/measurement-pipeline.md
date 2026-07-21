@@ -2,10 +2,14 @@
 
 The production measurement path is split into two layers:
 
-- `DualScaleReader` is the sole HX711 owner. Its pinned FreeRTOS task polls both DOUT pins, reads synchronized pairs, measures cadence and read skew, and applies sensor commands.
-- `MeasurementPipeline` is allocation-free ordinary C++. It performs median-of-3 filtering, calibration, optional matrix correction, 96-point history, regression/ranges, state hysteresis, common time-normalized EMA, total conservation, health, and confidence.
+- `DualScaleReader` is the sole HX711 owner. Its pinned FreeRTOS task polls both DOUT pins, immediately reads ready channels, assembles bounded cadence-aware pairs, measures per-channel cadence and sample skew, and applies sensor commands.
+- `MeasurementPipeline` is allocation-free ordinary C++. It performs median-of-3 filtering, calibration, optional matrix correction, per-channel time-aware EMA, 96-point filtered history, regression/ranges, state hysteresis, total conservation, health, and confidence.
 
-The Arduino loop only copies the latest immutable snapshot. LED rendering, JSON serialization, Wi-Fi maintenance, and WebSocket transmission never run in the sensor task. Production telemetry remains protocol v1, retains the existing fields, adds measurement diagnostics, and publishes every 50 ms. Slow clients receive newer frames instead of a queued backlog.
+The Arduino loop only copies the latest immutable snapshot. LED rendering, JSON serialization, Wi-Fi maintenance, and WebSocket transmission never run in the sensor task. Production telemetry remains protocol v1, retains the existing fields, adds measurement diagnostics, and publishes the latest snapshot every 125 ms without bucket averaging. Slow clients receive newer frames instead of a queued backlog.
+
+Each channel updates only from a genuine HX711 sample using `alpha = 1 - exp(-dt / tau)` and `filtered += alpha * (measurement - filtered)`. Production uses `tau=0.25 s`; the configured `0.12 s` fast constant remains disabled until live pre-EMA innovation captures support trustworthy transition thresholds. Held peers never re-enter the EMA. Tare, calibration, reconnection, and gaps longer than 250 ms reset only the affected channel filter.
+
+Pair tolerance is 60% of the slower measured channel period, bounded to 7.5-75 ms. Samples are read immediately into a pending assembler, so waiting for a peer never blocks acquisition. Telemetry distinguishes synchronized pairs, recent retained peers, unavailable channels, and repeated publications through pair status, pipeline sequence, telemetry sequence, and `new_snapshot`.
 
 ## Calibration and tare
 

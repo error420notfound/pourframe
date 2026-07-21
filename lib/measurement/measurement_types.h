@@ -11,12 +11,19 @@ enum class MeasurementState : uint8_t {
   DisturbedOrUncertain,
 };
 
+enum class PairStatus : uint8_t {
+  Synchronized,
+  RetainedPeer,
+  Unavailable,
+};
+
 struct RawSamplePair {
   uint32_t sequence = 0;
   uint64_t pairTimestampUs = 0;
   uint64_t upperReadTimestampUs = 0;
   uint64_t lowerReadTimestampUs = 0;
   uint32_t pairSkewUs = 0;
+  uint32_t pairToleranceUs = 0;
   int32_t upperRaw = 0;
   int32_t lowerRaw = 0;
   bool upperValid = false;
@@ -74,16 +81,27 @@ struct MeasurementSnapshot {
   MeasurementState state = MeasurementState::DisturbedOrUncertain;
   MeasurementState candidateState = MeasurementState::DisturbedOrUncertain;
   double selectedAlpha = 0.0;
+  double upperInnovation = 0.0;
+  double lowerInnovation = 0.0;
+  double upperAlpha = 0.0;
+  double lowerAlpha = 0.0;
+  double upperTauSeconds = 0.0;
+  double lowerTauSeconds = 0.0;
+  bool upperUpdated = false;
+  bool lowerUpdated = false;
   bool isStable = false;
   double confidence = 0.0;
   ChannelHealth upperHealth{};
   ChannelHealth lowerHealth{};
   bool pairValid = false;
+  PairStatus pairStatus = PairStatus::Unavailable;
   double observedSampleRateHz = 0.0;
   double upperSampleRateHz = 0.0;
   double lowerSampleRateHz = 0.0;
   uint32_t pairSkewUs = 0;
+  uint32_t pairToleranceUs = 0;
   uint32_t droppedSamples = 0;
+  uint32_t partialSamples = 0;
 };
 
 inline const char *stateName(MeasurementState state) {
@@ -96,6 +114,17 @@ inline const char *stateName(MeasurementState state) {
       return "DRAWDOWN";
     default:
       return "DISTURBED_OR_UNCERTAIN";
+  }
+}
+
+inline const char *pairStatusName(PairStatus status) {
+  switch (status) {
+    case PairStatus::Synchronized:
+      return "synchronized";
+    case PairStatus::RetainedPeer:
+      return "retained_peer";
+    default:
+      return "unavailable";
   }
 }
 

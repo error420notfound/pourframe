@@ -6,20 +6,21 @@
 namespace measurement {
 namespace config {
 
-constexpr uint32_t kRevision = 1;
-constexpr float kNominalSampleRateHz = 80.0f;
-constexpr uint64_t kNominalPeriodUs = 12500;
-constexpr uint32_t kPublicationIntervalMs = 50;
+constexpr uint32_t kRevision = 2;
+constexpr float kNominalSampleRateHz = 10.0f;
+constexpr uint64_t kNominalPeriodUs = 100000;
+constexpr uint32_t kPublicationIntervalMs = 125;
 constexpr size_t kMedianWindow = 3;
 constexpr size_t kHistoryCapacity = 96;
 constexpr uint64_t kSlopeWindowUs = 320000;
 constexpr uint64_t kRangeWindowUs = 625000;
 constexpr uint64_t kFilterResetGapUs = 250000;
 
-constexpr float kStableAlpha80 = 0.06f;
-constexpr float kDrawdownAlpha80 = 0.11f;
-constexpr float kActiveAlpha80 = 0.21f;
-constexpr float kDisturbedAlpha80 = 0.06f;
+constexpr double kNormalTauSeconds = 0.25;
+// Reserved for a future innovation-driven transition after live captures
+// establish trustworthy thresholds. Production currently always selects the
+// normal time constant.
+constexpr double kFastTauSeconds = 0.12;
 
 constexpr float kActiveSlopeEnterGps = 0.8f;
 constexpr float kActiveSlopeExitGps = 0.5f;
@@ -44,8 +45,10 @@ constexpr uint64_t kStableExitDwellUs = 100000;
 constexpr float kStableConfidenceThreshold = 0.8f;
 
 constexpr uint32_t kPairSkewTargetUs = 1000;
-constexpr uint32_t kPairSkewWarningUs = 1500;
-constexpr uint32_t kPairTimeoutUs = 30000;
+constexpr double kPairTolerancePeriodFraction = 0.60;
+constexpr uint32_t kPairToleranceMinimumUs = 7500;
+constexpr uint32_t kPairToleranceMaximumUs = 75000;
+constexpr uint32_t kInitialPairToleranceUs = 60000;
 constexpr uint32_t kStaleMinimumMs = 250;
 constexpr uint32_t kDisconnectedMinimumMs = 1000;
 constexpr int32_t kAdcMinimum = -8388608;
