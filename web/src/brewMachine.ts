@@ -38,7 +38,7 @@ export function initialBrewMachine(): BrewMachineState {
 export function reduceBrewMachine(state: BrewMachineState, event: BrewMachineEvent): BrewMachineState {
   if (event.type === 'RESET') return initialBrewMachine()
   if (event.type === 'PREPARE' && state.phase === 'IDLE') return { ...initialBrewMachine(), phase: 'PREPARING', brewId: event.brewId }
-  if (event.type === 'PREPARED' && state.phase === 'PREPARING') return { ...state, phase: 'READY', mode: event.mode, error: null }
+  if (event.type === 'PREPARED' && (state.phase === 'PREPARING' || state.phase === 'READY')) return { ...state, phase: 'READY', mode: event.mode, error: null }
   if (event.type === 'COUNTDOWN' && (state.phase === 'READY' || state.phase === 'POUR_ACTIVE' || state.phase === 'PAUSED')) return { ...state, phase: 'STEP_COUNTDOWN', activeCueId: event.cueId, countdownGeneration: event.generation }
   if (event.type === 'WAIT_FOR_BASELINE' && state.phase === 'STEP_COUNTDOWN') return { ...state, phase: 'WAITING_FOR_STABLE_BASELINE', activeCueId: null }
   if (event.type === 'ACTIVATE' && !state.transitions.some((value) => value.transition_id === event.transition.transition_id)) return { ...state, phase: 'POUR_ACTIVE', currentStepIndex: event.baseline.step_index, activeCueId: null, baselines: [...state.baselines, event.baseline], transitions: [...state.transitions, event.transition], reducedConfidence: state.reducedConfidence || event.baseline.reduced_confidence }

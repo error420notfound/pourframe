@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { deriveActiveBrewSummary } from './brewSummaryModel'
 import { buildSchedule, expectedRecipeYield, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
 import { createCoffeeBag, filterCoffeeBags, normalizeCoffeeBag, snapshotCoffeeBag, sortCoffeeBags, validateCoffeeBag } from './coffeeBag'
 import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
@@ -18,6 +19,83 @@ function telemetry(partial = false, stable = true): DeviceTelemetry {
 }
 
 const ack = (id: string): ProtocolAck => ({ v: 1, type: 'ack', id, ok: true, message: 'ok' })
+
+describe('active brew summary model', () => {
+  it('uses synchronized cumulative water and elapsed recipe progress', () => {
+    const recipe = { ...defaultRecipes[0], brewTime: 180, water: 320 }
+    const schedule = buildSchedule(recipe)
+    const sample = telemetry()
+    sample.total.grams = 125.4
+    const model = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'brewing',
+      elapsed: 90,
+      mode: 'device',
+      telemetry: sample,
+      machine: { ...initialBrewMachine(), phase: 'POUR_ACTIVE', currentStepIndex: 1 },
+    })
+
+    expect(model.progress).toBe(.5)
+    expect(model.progressPercent).toBe(50)
+    expect(model.step.id).toBe('pour-1')
+    expect(model.next?.id).toBe('pour-2')
+    expect(model.totalWater).toBe(125.4)
+    expect(model.remainingWater).toBeCloseTo(194.6)
+    expect(model.weightState).toBe('available')
+  })
+
+  it('never exports a partial or timer-only value as total water', () => {
+    const recipe = defaultRecipes[0]
+    const schedule = buildSchedule(recipe)
+    const partial = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'paused',
+      elapsed: 45,
+      mode: 'device',
+      telemetry: telemetry(true),
+      machine: { ...initialBrewMachine(), phase: 'PAUSED', currentStepIndex: 0 },
+    })
+    const timerOnly = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'brewing',
+      elapsed: 45,
+      mode: 'timer_only',
+      telemetry: telemetry(),
+      machine: { ...initialBrewMachine(), phase: 'POUR_ACTIVE', mode: 'timer_only', currentStepIndex: 0 },
+    })
+
+    expect(partial.totalWater).toBeNull()
+    expect(partial.remainingWater).toBeNull()
+    expect(partial.weightState).toBe('unavailable')
+    expect(timerOnly.totalWater).toBeNull()
+    expect(timerOnly.weightState).toBe('timer_only')
+  })
+
+  it('clamps completion progress and reports honest over-target water', () => {
+    const recipe = defaultRecipes[0]
+    const schedule = buildSchedule(recipe)
+    const sample = telemetry()
+    sample.total.grams = recipe.water + 3.2
+    const model = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'complete',
+      elapsed: recipe.brewTime + 15,
+      mode: 'device',
+      telemetry: sample,
+      machine: { ...initialBrewMachine(), phase: 'COMPLETE', currentStepIndex: schedule.length - 1 },
+    })
+
+    expect(model.progress).toBe(1)
+    expect(model.progressPercent).toBe(100)
+    expect(model.step.kind).toBe('drawdown')
+    expect(model.next).toBeNull()
+    expect(model.remainingWater).toBeCloseTo(-3.2)
+  })
+})
 
 describe('recipe semantics', () => {
   it('uses four pours after bloom for the 20 g 1:16 example', () => {
@@ -149,6 +227,15 @@ describe('device preparation and virtual baselines', () => {
   it('resets transient state without inventing another preparation', () => {
     const dirty: BrewMachineState = { ...initialBrewMachine(), phase: 'ERROR', brewId: 'brew-1', error: 'tare failed', activeCueId: 'cue-1' }
     expect(reduceBrewMachine(dirty, { type: 'RESET' })).toEqual(initialBrewMachine())
+  })
+
+  it('can switch a prepared brew to timer-only when synchronized telemetry disappears before start', () => {
+    const ready: BrewMachineState = { ...initialBrewMachine(), phase: 'READY', mode: 'device', brewId: 'brew-1' }
+    expect(reduceBrewMachine(ready, { type: 'PREPARED', mode: 'timer_only' })).toMatchObject({
+      phase: 'READY',
+      mode: 'timer_only',
+      brewId: 'brew-1',
+    })
   })
 
   it('records an explicit timer-only transition as reduced confidence', () => {

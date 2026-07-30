@@ -23,7 +23,7 @@ function loadAcknowledgedCommands() {
   } catch { return new Set<string>() }
 }
 
-export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, telemetry: DeviceTelemetry | null, connection: ConnectionState, sendCommand: LegacySender, sendProtocolCommand: ProtocolSender, saveBrew: SaveBrew, sound: boolean) {
+export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, telemetry: DeviceTelemetry | null, connection: ConnectionState, sendCommand: LegacySender, sendProtocolCommand: ProtocolSender, saveBrew: SaveBrew) {
   const schedule = useMemo(() => buildSchedule(recipe), [recipe])
   const [machine, setMachine] = useState(initialBrewMachine)
   const machineRef = useRef(machine)
@@ -90,7 +90,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
       const transition: StepTransition = { transition_id: transitionId, step_id: step.id, scheduled_elapsed_ms: Math.round(step.start * 1000), actual_elapsed_ms: actualElapsed, actual_timestamp: new Date().toISOString(), outcome: 'missed', cue: physicalCueRef.current === 'completed' ? 'completed' : 'unavailable', reduced_confidence: true }
       event({ type: 'ACTIVATE_TIMER', stepIndex: index, transition })
       if (index === 0) { clockStartedAt.current = performance.now(); pausedTotal.current = 0; setElapsedMs(0) }
-      playCue(index === 0 ? 'start' : 'pour', sound)
+      playCue(index === 0 ? 'start' : 'pour')
       return
     }
     const currentTelemetry = telemetryRef.current
@@ -103,8 +103,8 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
     setMessage(index === 0 ? 'Brew started.' : `${step.name} started.`)
     if (index === 0) { clockStartedAt.current = performance.now(); pausedTotal.current = 0; setElapsedMs(0) }
     void sendOnce(`step:${transitionId}`, { command: 'brew_step_activate', transition_id: transitionId, baseline_total_grams: captured.baseline.total_g, step_target_grams: step.pour, cumulative_target_grams: step.cumulative }).catch((error: unknown) => setMessage(error instanceof Error ? error.message : 'Physical step target unavailable'))
-    playCue(index === 0 ? 'start' : 'pour', sound)
-  }, [elapsedNow, event, schedule, sendOnce, sound])
+    playCue(index === 0 ? 'start' : 'pour')
+  }, [elapsedNow, event, schedule, sendOnce])
 
   const beginCountdown = useCallback((index: number, generation = machineRef.current.countdownGeneration) => {
     const step = schedule[index]
@@ -118,9 +118,9 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
       void sendOnce(`cue:${cueId}`, { command: 'brew_step_cue', cue_id: cueId, pulse_count: 5, interval_ms: 1000 })
         .catch((error: unknown) => { updatePhysicalCue('unavailable'); setMessage(error instanceof Error ? error.message : 'Physical cue unavailable') })
     }
-    for (let pulse = 0; pulse < 5; pulse += 1) countdownTimers.current.push(window.setTimeout(() => playCue('tick', sound), pulse * 1000))
+    for (let pulse = 0; pulse < 5; pulse += 1) countdownTimers.current.push(window.setTimeout(() => playCue('tick'), pulse * 1000))
     countdownTimers.current.push(window.setTimeout(() => { if (physicalCueRef.current === 'active') updatePhysicalCue('completed'); activate(index, transitionId, 'automatic') }, 5000))
-  }, [activate, clearCountdown, connection, event, schedule, sendOnce, sound, updatePhysicalCue])
+  }, [activate, clearCountdown, connection, event, schedule, sendOnce, updatePhysicalCue])
 
   useEffect(() => {
     if (machine.phase === 'IDLE' || machine.phase === 'PREPARING' || machine.phase === 'READY' || machine.phase === 'PAUSED' || machine.phase === 'COMPLETE' || machine.phase === 'ERROR') return
@@ -245,7 +245,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
 
   const finish = useCallback(async () => {
     if (saved.current) return
-    saved.current = true; clearCountdown(); event({ type: 'COMPLETE' }); playCue('complete', sound)
+    saved.current = true; clearCountdown(); event({ type: 'COMPLETE' }); playCue('complete')
     void sendProtocolCommand({ command: 'brew_step_clear' }).catch(() => undefined)
     const encoded = machineRef.current.mode === 'device' ? encodeTrace(trace.current!.samples()) : null
     const recordDeviceData = machineRef.current.mode === 'device'
@@ -256,7 +256,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
       const inventoryWarning = await saveBrew(record, encoded?.bytes, selectedBag?.id, selectedBag ? recipe.coffee : undefined)
       setMessage(inventoryWarning === 'coffee_bag_not_found' ? 'Brew saved. The selected coffee bag was deleted before inventory could be updated.' : selectedBag ? `Brew saved and ${formatRecipeWeight(recipe.coffee)} g deducted from ${selectedBag.name}.` : 'Brew saved on PourFrame.')
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Brew saved to the local retry outbox') }
-  }, [clearCountdown, elapsedNow, event, recipe, saveBrew, schedule, sendProtocolCommand, sound, telemetry])
+  }, [clearCountdown, elapsedNow, event, recipe, saveBrew, schedule, sendProtocolCommand, telemetry])
 
   useEffect(() => { if (machine.phase === 'DRAWDOWN' && elapsedMs >= recipe.brewTime * 1000) void finish() }, [elapsedMs, finish, machine.phase, recipe.brewTime])
   useEffect(() => () => clearCountdown(), [clearCountdown])

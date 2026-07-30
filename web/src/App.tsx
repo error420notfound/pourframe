@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
-import { BookOpen, ChevronRight, Coffee, History, Moon, Pause, Play, RotateCcw, Save, Scale, Sun, Volume2, VolumeX } from 'lucide-react'
+import { BookOpen, ChevronRight, Coffee, History, Maximize2, Moon, Pause, Play, RotateCcw, Save, Scale, Sun, Volume2, VolumeX } from 'lucide-react'
+import { ActiveBrewSummary } from './ActiveBrewSummary'
+import { setAudioEnabled } from './audio'
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
 import { buildSchedule, createId, expectedRecipeYield, formatRecipeInput, formatRecipeWeight, formatTime, migrateRecipe, normalizeRecipe, updateRecipeNumber, validateRecipe } from './brew'
 import { BrewGraph, brewMilestones } from './BrewGraph'
@@ -681,7 +683,34 @@ function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relativ
   </section>
 }
 
-function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, status, elapsed, mode, telemetry, machine, relative, cue, message, traceBuffer, dualTare, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly }: { recipe: BrewRecipe; coffeeBags: CoffeeBagRecord[]; coffeeBagId: string | null; onCoffeeBagChange: (id: string | null) => void; status: BrewStatus; elapsed: number; mode: BrewMode; telemetry: DeviceTelemetry | null; machine: BrewMachineState; relative: { relativeUpper: number | null; relativeLower: number | null; stepWaterAdded: number | null }; cue: string; message: string; traceBuffer: NonNullable<ReturnType<typeof useGuidedBrew>['traceBuffer']>; dualTare: DualTareControl; onStart: () => void; onPause: () => void; onReset: () => void; onFinish: () => void; onManualAdvance: () => void; onTimerOnly: () => void }) {
+interface BrewWorkspaceProps {
+  recipe: BrewRecipe
+  coffeeBags: CoffeeBagRecord[]
+  coffeeBagId: string | null
+  onCoffeeBagChange: (id: string | null) => void
+  status: BrewStatus
+  elapsed: number
+  mode: BrewMode
+  telemetry: DeviceTelemetry | null
+  machine: BrewMachineState
+  relative: { relativeUpper: number | null; relativeLower: number | null; stepWaterAdded: number | null }
+  cue: string
+  message: string
+  sound: boolean
+  traceBuffer: NonNullable<ReturnType<typeof useGuidedBrew>['traceBuffer']>
+  dualTare: DualTareControl
+  onStart: () => void
+  onPause: () => void
+  onReset: () => void
+  onFinish: () => Promise<void>
+  onManualAdvance: () => void
+  onTimerOnly: () => void
+  onToggleSound: () => void
+}
+
+function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, status, elapsed, mode, telemetry, machine, relative, cue, message, sound, traceBuffer, dualTare, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly, onToggleSound }: BrewWorkspaceProps) {
+  const [summaryOpen, setSummaryOpen] = useState(false)
+  const summaryTriggerRef = useRef<HTMLButtonElement | null>(null)
   const schedule = useMemo(() => buildSchedule(recipe), [recipe])
   const index = machine.phase === 'DRAWDOWN' || machine.phase === 'COMPLETE' ? schedule.length - 1 : Math.max(0, machine.currentStepIndex)
   const step = schedule[index] ?? schedule[0]
@@ -690,6 +719,16 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
   const progress = Math.min(1, elapsed / recipe.brewTime)
   const active = status === 'brewing' || status === 'paused'
   const selectedBag = coffeeBags.find((bag) => bag.id === coffeeBagId) ?? null
+  const openSummary = useCallback(() => {
+    setSummaryOpen(true)
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      void document.documentElement.requestFullscreen().catch(() => undefined)
+    }
+  }, [])
+  const closeSummary = useCallback(() => {
+    setSummaryOpen(false)
+    requestAnimationFrame(() => summaryTriggerRef.current?.focus())
+  }, [])
   return <div className="brew-layout">
     <section className="brew-hero" aria-labelledby="brew-title">
       <div className="brew-hero__copy"><p className="brew-eyebrow">Guided brew</p><h2 id="brew-title">{recipe.name}</h2><label className="brew-coffee-select"><span>Coffee bag</span><select disabled={active} value={coffeeBagId ?? ''} onChange={(event) => onCoffeeBagChange(event.target.value || null)}><option value="">No coffee bag</option>{coffeeBags.map((bag) => <option key={bag.id} value={bag.id}>{bag.name} · {bag.roastery} · {formatRecipeWeight(bag.remainingWeightG)} g{bag.remainingWeightG <= 0 ? ' · depleted' : ''}</option>)}</select></label>{selectedBag ? <small className={selectedBag.remainingWeightG < recipe.coffee ? 'brew-coffee-stock brew-coffee-stock--warning' : 'brew-coffee-stock'}>{selectedBag.remainingWeightG < recipe.coffee ? 'Low tracked stock · confirmation required' : `${formatRecipeWeight(selectedBag.remainingWeightG)} g remaining`}</small> : null}</div>
@@ -698,6 +737,7 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
       <div className="brew-actions">
         {!active ? <button className="brew-primary" onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Prepare brew'}</button> : <button className="brew-primary" onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{status === 'paused' ? 'Resume' : 'Pause'}</button>}
         <button className="brew-secondary" disabled={elapsed === 0 && status === 'idle'} onClick={onReset}><RotateCcw aria-hidden="true" />Reset</button>
+        {active ? <button className="brew-secondary" onClick={openSummary} ref={summaryTriggerRef}><Maximize2 aria-hidden="true" />Full screen</button> : null}
         {active ? <button className="brew-secondary" onClick={onManualAdvance}>Advance step</button> : null}
         {machine.phase === 'WAITING_FOR_STABLE_BASELINE' && mode === 'device' ? <button className="brew-secondary" onClick={onTimerOnly}>Continue timer only</button> : null}
         {active ? <button className="brew-secondary" onClick={onFinish}>Finish</button> : null}
@@ -708,6 +748,21 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
     {message ? <p className="brew-session-message" role="status">{message}</p> : null}
     <section className="brew-graph-card" aria-labelledby="live-brew-graph-heading"><div className="section-heading"><div><p className="brew-eyebrow">Automatic recording</p><h3 id="live-brew-graph-heading">Live brew graph</h3></div><span>{mode === 'timer_only' ? 'Timer only' : status === 'brewing' ? 'Recording' : status === 'paused' ? 'Paused' : status === 'complete' ? 'Saved' : 'Ready'}</span></div><BrewGraph source={traceBuffer} milestones={brewMilestones(recipe, schedule, machine.transitions)} /></section>
     <section className="brew-guide" aria-live="polite"><div className="brew-guide__current"><span>Current step · target {formatRecipeWeight(step.cumulative)} g</span><h3>{step.name}</h3><p>{step.instruction}</p>{next ? <div className="next-step"><span>Next</span><strong>{next.name} at {formatTime(next.start)}</strong><ChevronRight aria-hidden="true" /></div> : null}</div><ol className="brew-timeline">{schedule.map((item, itemIndex) => <li className={itemIndex < index ? 'done' : itemIndex === index ? 'active' : ''} key={item.id}><span>{itemIndex < index ? '✓' : itemIndex + 1}</span><div><strong>{item.name}</strong><small>{formatRecipeWeight(item.cumulative)} g · {formatTime(item.start)}</small></div></li>)}</ol></section>
+    {summaryOpen ? <ActiveBrewSummary
+      elapsed={elapsed}
+      machine={machine}
+      message={message}
+      mode={mode}
+      onEnd={onFinish}
+      onExit={closeSummary}
+      onPauseResume={onPause}
+      onToggleSound={onToggleSound}
+      recipe={recipe}
+      schedule={schedule}
+      sound={sound}
+      status={status}
+      telemetry={telemetry}
+    /> : null}
   </div>
 }
 
@@ -783,7 +838,12 @@ function App() {
   const [sound, setSound] = useState(() => storedValue('pourframe.sound') !== 'off')
   const [dark, setDark] = useState(() => storedValue('pourframe.theme') === 'dark')
   const coffeeBag = library.coffeeBags.find((bag) => bag.id === coffeeBagId) ?? null
-  const guided = useGuidedBrew(recipe, coffeeBag, device.telemetry, device.connection, device.sendCommand, device.sendProtocolCommand, library.saveBrew, sound)
+  const guided = useGuidedBrew(recipe, coffeeBag, device.telemetry, device.connection, device.sendCommand, device.sendProtocolCommand, library.saveBrew)
+  const toggleSound = useCallback(() => {
+    const enabled = !sound
+    setAudioEnabled(enabled)
+    setSound(enabled)
+  }, [sound])
 
   useEffect(() => {
     const selected = library.recipes.find((item) => item.id === storedValue('pourframe.lastRecipe')) ?? library.recipes[0]
@@ -799,7 +859,10 @@ function App() {
     if (coffeeBagId && !library.coffeeBags.some((bag) => bag.id === coffeeBagId)) setCoffeeBagId(null)
   }, [coffeeBagId, library.coffeeBags])
 
-  useEffect(() => { storeValue('pourframe.sound', sound ? 'on' : 'off') }, [sound])
+  useEffect(() => {
+    setAudioEnabled(sound)
+    storeValue('pourframe.sound', sound ? 'on' : 'off')
+  }, [sound])
   useEffect(() => { storeValue('pourframe.theme', dark ? 'dark' : 'light') }, [dark])
   useEffect(() => { storeValue('pourframe.lastRecipe', recipe.id) }, [recipe.id])
   useEffect(() => { storeValue('pourframe.recipes.view.v1', recipeLibraryView) }, [recipeLibraryView])
@@ -823,11 +886,11 @@ function App() {
   const dualTare = useDualTare(device.sendCommand, tareBothAvailable)
 
   return <main className="appliance" data-theme={dark ? 'dark' : 'light'}>
-    <header className="appliance-header"><a className="brand" href="#brew"><span>PF</span><div><strong>PourFrame</strong><small>Local brewing appliance</small></div></a><nav aria-label="Primary navigation">{([['brew', 'Brew', Coffee], ['recipes', 'Recipes', BookOpen], ['history', 'History', History], ['device', 'Device', Scale]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id, recipeLibraryView)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><div className="appliance-actions"><span className={online ? 'appliance-connection online' : 'appliance-connection'}><i />{online ? 'Scale live' : device.connection === 'connecting' ? 'Finding scale' : 'Scale offline'}</span><button aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'} onClick={() => setSound((value) => !value)}>{sound ? <Volume2 /> : <VolumeX />}</button><button aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={() => setDark((value) => !value)}>{dark ? <Sun /> : <Moon />}</button></div></header>
+    <header className="appliance-header"><a className="brand" href="#brew"><span>PF</span><div><strong>PourFrame</strong><small>Local brewing appliance</small></div></a><nav aria-label="Primary navigation">{([['brew', 'Brew', Coffee], ['recipes', 'Recipes', BookOpen], ['history', 'History', History], ['device', 'Device', Scale]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id, recipeLibraryView)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><div className="appliance-actions"><span className={online ? 'appliance-connection online' : 'appliance-connection'}><i />{online ? 'Scale live' : device.connection === 'connecting' ? 'Finding scale' : 'Scale offline'}</span><button aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'} onClick={toggleSound}>{sound ? <Volume2 /> : <VolumeX />}</button><button aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={() => setDark((value) => !value)}>{dark ? <Sun /> : <Moon />}</button></div></header>
     {library.hasLegacy ? <div className="legacy-banner"><span>Browser-saved PourOver recipes were found.</span><button onClick={() => void library.importLegacy()}>Import to PourFrame</button></div> : null}
     {library.status !== 'ready' ? <div className={`library-status library-status--${library.status}`} role="status">{library.message}</div> : null}
     <div className="appliance-body">
-      {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.telemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} traceBuffer={guided.traceBuffer!} dualTare={dualTare} onStart={() => guided.setPrepStage('confirm')} onPause={guided.pauseResume} onReset={guided.reset} onFinish={() => void guided.finish()} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} /> : null}
+      {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.telemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} sound={sound} traceBuffer={guided.traceBuffer!} dualTare={dualTare} onStart={() => guided.setPrepStage('confirm')} onPause={guided.pauseResume} onReset={guided.reset} onFinish={guided.finish} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} onToggleSound={toggleSound} /> : null}
       {tab === 'recipes' ? <div className="recipes-area"><div className="recipe-section-tabs" role="tablist" aria-label="Recipe library sections"><a aria-selected={recipeLibraryView === 'coffee'} className={recipeLibraryView === 'coffee' ? 'active' : ''} href={appHash('recipes', 'coffee')} role="tab">Coffee bags</a><a aria-selected={recipeLibraryView === 'recipes'} className={recipeLibraryView === 'recipes' ? 'active' : ''} href={appHash('recipes', 'recipes')} role="tab">Brew recipes</a></div>{recipeLibraryView === 'coffee' ? <CoffeeBagWorkspace bags={library.coffeeBags} onSave={library.saveCoffeeBag} onDelete={library.deleteCoffeeBag} /> : <RecipeWorkspace recipes={library.recipes} active={recipe} onSelect={selectRecipe} onSave={async (value) => { await library.saveRecipe(value); selectRecipe(value) }} onDelete={async (id) => { await library.deleteRecipe(id); if (recipe.id === id) selectRecipe(library.recipes.find((item) => item.id !== id) ?? defaultRecipes[0]) }} />}</div> : null}
       {tab === 'history' ? <HistoryWorkspace brews={library.brews} onClear={library.clearBrews} /> : null}
       {tab === 'device' ? <DeviceWorkspace telemetry={device.telemetry} connection={device.connection} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} dualTare={dualTare} /> : null}

@@ -1,0 +1,253 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Minimize2, Pause, Play, Square, Volume2, VolumeX } from 'lucide-react'
+import { deriveActiveBrewSummary } from './brewSummaryModel'
+import { formatRecipeWeight, formatTime } from './brew'
+import type { BrewMachineState } from './brewMachine'
+import type { BrewMode, BrewRecipe, BrewStatus, BrewStep } from './brewTypes'
+import type { DeviceTelemetry } from './types'
+
+export interface ActiveBrewSummaryProps {
+  recipe: BrewRecipe
+  schedule: BrewStep[]
+  status: BrewStatus
+  elapsed: number
+  mode: BrewMode
+  telemetry: DeviceTelemetry | null
+  machine: BrewMachineState
+  message: string
+  sound: boolean
+  onPauseResume: () => void
+  onEnd: () => Promise<void>
+  onToggleSound: () => void
+  onExit: () => void
+}
+
+const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function formatWeight(value: number) {
+  const rounded = Math.round(value * 10) / 10
+  return (Object.is(rounded, -0) ? 0 : rounded).toFixed(1)
+}
+
+export function ActiveBrewSummary({
+  recipe,
+  schedule,
+  status,
+  elapsed,
+  mode,
+  telemetry,
+  machine,
+  message,
+  sound,
+  onPauseResume,
+  onEnd,
+  onToggleSound,
+  onExit,
+}: ActiveBrewSummaryProps) {
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const primaryActionRef = useRef<HTMLButtonElement | null>(null)
+  const exitButtonRef = useRef<HTMLButtonElement | null>(null)
+  const endButtonRef = useRef<HTMLButtonElement | null>(null)
+  const confirmRef = useRef<HTMLElement | null>(null)
+  const cancelEndRef = useRef<HTMLButtonElement | null>(null)
+  const fullscreenWasActiveRef = useRef(Boolean(document.fullscreenElement))
+  const confirmingEndRef = useRef(false)
+  const [confirmingEnd, setConfirmingEnd] = useState(false)
+  const [ending, setEnding] = useState(false)
+  const summary = deriveActiveBrewSummary({ recipe, schedule, status, elapsed, mode, telemetry, machine })
+  const complete = status === 'complete'
+  const paused = status === 'paused'
+  confirmingEndRef.current = confirmingEnd
+
+  const exit = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+    onExit()
+  }, [onExit])
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    const appliance = document.querySelector<HTMLElement>('.appliance')
+    const applianceWasInert = appliance?.hasAttribute('inert') ?? false
+    const previousAriaHidden = appliance?.getAttribute('aria-hidden')
+    document.body.style.overflow = 'hidden'
+    appliance?.setAttribute('inert', '')
+    appliance?.setAttribute('aria-hidden', 'true')
+    primaryActionRef.current?.focus()
+
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement) fullscreenWasActiveRef.current = true
+      else if (fullscreenWasActiveRef.current) onExit()
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (confirmingEndRef.current) {
+          setConfirmingEnd(false)
+          requestAnimationFrame(() => endButtonRef.current?.focus())
+        } else {
+          exit()
+        }
+        return
+      }
+      if (event.key !== 'Tab') return
+      const scope = confirmingEndRef.current ? confirmRef.current : overlayRef.current
+      if (!scope) return
+      const focusable = Array.from(scope.querySelectorAll<HTMLElement>(focusableSelector))
+        .filter((element) => element.getClientRects().length > 0)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      if (appliance) {
+        if (!applianceWasInert) appliance.removeAttribute('inert')
+        if (previousAriaHidden == null) appliance.removeAttribute('aria-hidden')
+        else appliance.setAttribute('aria-hidden', previousAriaHidden)
+      }
+      document.removeEventListener('fullscreenchange', onFullscreenChange)
+      window.removeEventListener('keydown', onKeyDown)
+      if (fullscreenWasActiveRef.current && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
+    }
+  }, [exit, onExit])
+
+  useEffect(() => {
+    if (complete) exitButtonRef.current?.focus()
+  }, [complete])
+
+  const requestEnd = () => {
+    setConfirmingEnd(true)
+    requestAnimationFrame(() => cancelEndRef.current?.focus())
+  }
+
+  const cancelEnd = () => {
+    setConfirmingEnd(false)
+    requestAnimationFrame(() => endButtonRef.current?.focus())
+  }
+
+  const confirmEnd = async () => {
+    if (ending) return
+    setEnding(true)
+    try {
+      await onEnd()
+      setConfirmingEnd(false)
+    } finally {
+      setEnding(false)
+    }
+  }
+
+  const remainingCopy = summary.remainingWater == null
+    ? summary.weightState === 'timer_only'
+      ? 'Timer-only brew · weight unavailable'
+      : 'Scale data unavailable or unsynchronized'
+    : summary.remainingWater > 0
+      ? `${formatWeight(summary.remainingWater)} g remaining`
+      : `${formatWeight(Math.abs(summary.remainingWater))} g over target`
+
+  return createPortal(
+    <div
+      aria-describedby="active-brew-summary-description"
+      aria-labelledby="active-brew-summary-title"
+      aria-modal="true"
+      className="active-brew-summary"
+      ref={overlayRef}
+      role="dialog"
+    >
+      <div
+        aria-label="Brew progress"
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={summary.progressPercent}
+        aria-valuetext={`${summary.progressPercent}% of brew time elapsed`}
+        className="active-brew-summary__progress"
+        role="progressbar"
+        style={{ transform: `scaleX(${summary.progress})` }}
+      />
+      <div aria-hidden={confirmingEnd || undefined} className="active-brew-summary__content">
+        <header className="active-brew-summary__header">
+          <div className="active-brew-summary__stage">
+            <span>{complete ? 'Brew complete' : paused ? 'Brew paused' : 'Active brew'}</span>
+            <strong id="active-brew-summary-title">{summary.step.name}</strong>
+            <small>{recipe.name}</small>
+          </div>
+          <div className="active-brew-summary__utilities">
+            <button
+              aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'}
+              aria-pressed={!sound}
+              className="active-brew-summary__utility"
+              onClick={onToggleSound}
+              type="button"
+            >
+              {sound ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
+            </button>
+            <button aria-label="Exit full-screen brew summary" className="active-brew-summary__utility" onClick={exit} ref={exitButtonRef} type="button">
+              <Minimize2 aria-hidden="true" />
+            </button>
+          </div>
+        </header>
+
+        <div className="active-brew-summary__metrics" id="active-brew-summary-description">
+          <section className="active-brew-summary__metric active-brew-summary__metric--timer" aria-label="Elapsed brew time">
+            <span>Timer</span>
+            <strong>{formatTime(elapsed)}</strong>
+            <small>{formatTime(recipe.brewTime)} total</small>
+          </section>
+          <section className="active-brew-summary__metric active-brew-summary__metric--weight" aria-label="Cumulative water">
+            <span>Total water</span>
+            <strong>
+              {summary.totalWater == null ? '—' : formatWeight(summary.totalWater)}
+              {summary.totalWater == null ? null : <em>g</em>}
+            </strong>
+            <small>{remainingCopy} · {formatRecipeWeight(recipe.water)} g target</small>
+          </section>
+        </div>
+
+        <footer className="active-brew-summary__footer">
+          <div className="active-brew-summary__next" aria-live="polite">
+            {complete
+              ? <><span>Saved brew</span><strong>{message || 'Brew complete'}</strong></>
+              : summary.next
+                ? <><span>Next</span><strong>{summary.next.name} at {formatTime(summary.next.start)}</strong></>
+                : <><span>Current</span><strong>{summary.step.instruction}</strong></>}
+          </div>
+          {complete ? null : <div className="active-brew-summary__actions">
+            <button className="active-brew-summary__control active-brew-summary__control--primary" onClick={onPauseResume} ref={primaryActionRef} type="button">
+              {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+              <span>{paused ? 'Resume' : 'Pause'}</span>
+            </button>
+            <button className="active-brew-summary__control" onClick={requestEnd} ref={endButtonRef} type="button">
+              <Square aria-hidden="true" />
+              <span>End brew</span>
+            </button>
+          </div>}
+        </footer>
+      </div>
+
+      {confirmingEnd ? <div className="active-brew-summary__confirm-backdrop">
+        <section aria-labelledby="end-brew-title" aria-modal="true" className="active-brew-summary__confirm" ref={confirmRef} role="alertdialog">
+          <span>End active brew</span>
+          <h2 id="end-brew-title">Save this brew now?</h2>
+          <p>The current timer, weights, and trace will be saved as an early completion.</p>
+          <div>
+            <button className="active-brew-summary__confirm-cancel" onClick={cancelEnd} ref={cancelEndRef} type="button">Keep brewing</button>
+            <button className="active-brew-summary__confirm-end" disabled={ending} onClick={() => void confirmEnd()} type="button">
+              {ending ? 'Saving…' : 'End and save'}
+            </button>
+          </div>
+        </section>
+      </div> : null}
+    </div>,
+    document.body,
+  )
+}
