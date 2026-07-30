@@ -100,11 +100,16 @@ void sendApiError(AsyncWebServerRequest *request, int status, const char *code, 
 String apiErrorMessage(const String &code) {
   if (code == "revision_conflict") return "Shared data changed on another client. Refresh and try again.";
   if (code == "recipe_limit_reached") return "PourFrame can store up to 24 recipes.";
+  if (code == "coffee_bag_limit_reached") return "PourFrame can store up to 24 coffee bags.";
   if (code == "storage_limit_reached") return "PourFrame shared storage is full.";
   if (code == "recipe_not_found") return "The selected recipe no longer exists.";
+  if (code == "coffee_bag_not_found") return "The selected coffee bag no longer exists.";
   if (code == "trace_not_found") return "Upload the validated brew trace before committing its summary.";
   if (code.startsWith("invalid_recipe") || code == "recipe_equipment_limit") return "The recipe contains unsupported or oversized values.";
+  if (code.startsWith("invalid_coffee_bag") || code == "coffee_bag_detail_limit" ||
+      code == "coffee_bag_use_mismatch") return "The coffee bag contains unsupported or oversized values.";
   if (code.startsWith("invalid_brew")) return "The completed brew record is invalid.";
+  if (code == "completion_recovery_failed") return "PourFrame could not recover an interrupted brew completion.";
   if (code.startsWith("storage_")) return "PourFrame could not safely update shared storage.";
   return code;
 }
@@ -414,6 +419,68 @@ void NetworkService::configureRoutes() {
     sendJson(request, status, output);
   });
 
+  server_.on("/api/coffee-bags", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    if (!userDataReady_) {
+      sendApiError(request, 503, "storage_unavailable", "Shared coffee bag storage is unavailable");
+      return;
+    }
+    JsonDocument output;
+    String error;
+    if (!userDataStore_.readCoffeeBags(output, error)) {
+      sendApiError(request, 500, error.c_str(), "Stored coffee bags could not be read");
+      return;
+    }
+    sendJson(request, 200, output);
+  });
+
+  auto *coffeeBagPostHandler = new AsyncCallbackJsonWebHandler(
+      "/api/coffee-bags", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!userDataReady_) {
+          sendApiError(request, 503, "storage_unavailable", "Shared coffee bag storage is unavailable");
+          return;
+        }
+        if (!json.is<JsonObjectConst>()) {
+          sendApiError(request, 400, "invalid_json", "A JSON object is required");
+          return;
+        }
+        JsonDocument output;
+        String error;
+        int status = 500;
+        if (!userDataStore_.upsertCoffeeBag(json.as<JsonObjectConst>(), output, status, error)) {
+          sendApiError(request, status, error.c_str(), apiErrorMessage(error));
+          return;
+        }
+        sendJson(request, status, output);
+      });
+  coffeeBagPostHandler->setMethod(HTTP_POST);
+  coffeeBagPostHandler->setMaxContentLength(UserDataStore::kMaxCoffeeBagPayload);
+  server_.addHandler(coffeeBagPostHandler);
+
+  server_.on("/api/coffee-bags", HTTP_DELETE, [this](AsyncWebServerRequest *request) {
+    if (!userDataReady_) {
+      sendApiError(request, 503, "storage_unavailable", "Shared coffee bag storage is unavailable");
+      return;
+    }
+    if (!request->hasParam("id") || !request->hasParam("base_revision")) {
+      sendApiError(request, 422, "invalid_request", "id and base_revision are required");
+      return;
+    }
+    const String id = request->getParam("id")->value();
+    uint32_t baseRevision = 0;
+    if (!parseUint32(request->getParam("base_revision")->value(), baseRevision)) {
+      sendApiError(request, 422, "invalid_revision", "base_revision must be an unsigned integer");
+      return;
+    }
+    JsonDocument output;
+    String error;
+    int status = 500;
+    if (!userDataStore_.deleteCoffeeBag(id, baseRevision, output, status, error)) {
+      sendApiError(request, status, error.c_str(), apiErrorMessage(error));
+      return;
+    }
+    sendJson(request, status, output);
+  });
+
   server_.on("/api/brews", HTTP_GET, [this](AsyncWebServerRequest *request) {
     if (!userDataReady_) {
       sendApiError(request, 503, "storage_unavailable", "Shared brew storage is unavailable");
@@ -455,6 +522,29 @@ void NetworkService::configureRoutes() {
   brewPostHandler->setMethod(HTTP_POST);
   brewPostHandler->setMaxContentLength(UserDataStore::kMaxBrewPayload);
   server_.addHandler(brewPostHandler);
+
+  auto *brewCompletionHandler = new AsyncCallbackJsonWebHandler(
+      "/api/brew-completions", [this](AsyncWebServerRequest *request, JsonVariant &json) {
+        if (!userDataReady_) {
+          sendApiError(request, 503, "storage_unavailable", "Shared brew storage is unavailable");
+          return;
+        }
+        if (!json.is<JsonObjectConst>()) {
+          sendApiError(request, 400, "invalid_json", "A JSON object is required");
+          return;
+        }
+        JsonDocument output;
+        String error;
+        int status = 500;
+        if (!userDataStore_.completeBrew(json.as<JsonObjectConst>(), output, status, error)) {
+          sendApiError(request, status, error.c_str(), apiErrorMessage(error));
+          return;
+        }
+        sendJson(request, status, output);
+      });
+  brewCompletionHandler->setMethod(HTTP_POST);
+  brewCompletionHandler->setMaxContentLength(UserDataStore::kMaxBrewCompletionPayload);
+  server_.addHandler(brewCompletionHandler);
 
   server_.on("/api/brews", HTTP_DELETE, [this](AsyncWebServerRequest *request) {
     if (!userDataReady_) {

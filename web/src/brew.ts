@@ -18,6 +18,10 @@ export function formatRecipeInput(value: number) {
   return String(Math.round(value * 1000) / 1000)
 }
 
+export function expectedRecipeYield(recipe: Pick<BrewRecipe, 'coffee' | 'ratio'>) {
+  return recipe.coffee * recipe.ratio
+}
+
 export function migrateRecipe(recipe: BrewRecipe | (Omit<BrewRecipe, 'poursAfterBloom'> & { pours: number })): BrewRecipe {
   const legacy = recipe as BrewRecipe & { pours?: number }
   return {

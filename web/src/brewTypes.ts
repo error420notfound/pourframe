@@ -1,6 +1,8 @@
 import type { MeasurementState, PairStatus } from './types'
 
 export type GrindSize = 'Fine' | 'Medium-fine' | 'Medium' | 'Medium-coarse' | 'Coarse'
+export type RoastLevel = 'Light' | 'Medium-light' | 'Medium' | 'Medium-dark' | 'Dark'
+export type BeanForm = 'Whole bean' | 'Pre-ground'
 export type BrewPhase = 'IDLE' | 'PREPARING' | 'READY' | 'STEP_COUNTDOWN' | 'WAITING_FOR_STABLE_BASELINE' | 'POUR_ACTIVE' | 'PAUSED' | 'DRAWDOWN' | 'COMPLETE' | 'ERROR'
 export type BrewStatus = 'idle' | 'preparing' | 'brewing' | 'paused' | 'complete'
 export type BrewMode = 'device' | 'timer_only'
@@ -25,6 +27,29 @@ export interface BrewRecipe {
   notes: string
   bloomEdited?: boolean
 }
+
+export interface CoffeeBag {
+  id: string
+  name: string
+  roastery: string
+  roastedOn: string
+  roastLevel: RoastLevel
+  beanForm: BeanForm
+  grind?: GrindSize
+  tastingNotes: string[]
+  acidity?: number
+  bitterness?: number
+  originalWeightG: number
+  remainingWeightG: number
+  altitudeM?: number
+  origin: string
+  farm: string
+  processing: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type CoffeeBagSnapshot = Omit<CoffeeBag, 'remainingWeightG' | 'createdAt' | 'updatedAt'>
 
 export interface BrewStep {
   id: string
@@ -95,6 +120,8 @@ export interface BrewRecord {
   final: { upper_g: number | null; lower_g: number | null; total_g: number | null; beverage_g: number | null }
   sensor_summary: SensorSummary
   trace: TraceMetadata | null
+  coffee_bag?: CoffeeBagSnapshot | null
+  coffee_used_g?: number | null
 }
 
 export interface Collection<T> { v: 1; revision: number; items: T[] }

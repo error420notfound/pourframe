@@ -2,6 +2,7 @@
 
 #include <LittleFS.h>
 
+#include <cctype>
 #include <cmath>
 
 namespace {
@@ -30,6 +31,32 @@ bool integerInRange(JsonVariantConst value, long minimum, long maximum) {
 
 bool finiteOrNull(JsonVariantConst value) {
   return value.isNull() || finiteInRange(value, -100000, 100000);
+}
+
+bool stringEqualsOneOf(JsonVariantConst value, const char *const *options, size_t count) {
+  if (!value.is<const char *>()) return false;
+  const char *text = value.as<const char *>();
+  for (size_t index = 0; index < count; ++index) {
+    if (strcmp(text, options[index]) == 0) return true;
+  }
+  return false;
+}
+
+bool optionalRating(JsonVariantConst value) {
+  return value.isNull() || integerInRange(value, 1, 4);
+}
+
+bool calendarDate(JsonVariantConst value) {
+  if (!boundedString(value, 10, 10)) return false;
+  const char *text = value.as<const char *>();
+  for (size_t index = 0; index < 10; ++index) {
+    if (index == 4 || index == 7) {
+      if (text[index] != '-') return false;
+    } else if (!isdigit(static_cast<unsigned char>(text[index]))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool validRevision(JsonObjectConst request, uint32_t current, int &status, String &error) {
@@ -64,7 +91,7 @@ bool UserDataStore::begin() {
     return false;
   }
   String error;
-  return pruneBrews(error) && pruneOrphanTraces(error);
+  return recoverPendingCompletion(error) && pruneBrews(error) && pruneOrphanTraces(error);
 }
 
 void UserDataStore::makeCollection(JsonDocument &document) const {
@@ -115,7 +142,9 @@ bool UserDataStore::writeCollection(const char *path, const JsonDocument &docume
     return false;
   }
   const size_t expected = measureJson(document);
-  const size_t maximum = strcmp(path, kRecipesPath) == 0 ? kMaxRecipesFile : kMaxBrewsFile;
+  size_t maximum = kMaxBrewsFile;
+  if (strcmp(path, kRecipesPath) == 0) maximum = kMaxRecipesFile;
+  else if (strcmp(path, kCoffeeBagsPath) == 0) maximum = kMaxCoffeeBagsFile;
   if (expected == 0 || expected > maximum) {
     file.close();
     LittleFS.remove(temporary);
@@ -183,6 +212,63 @@ bool UserDataStore::validRecipe(JsonObjectConst recipe, String &error) const {
   return true;
 }
 
+bool UserDataStore::validCoffeeBag(JsonObjectConst coffeeBag, String &error) const {
+  static const char *const roastLevels[] = {"Light", "Medium-light", "Medium", "Medium-dark", "Dark"};
+  static const char *const beanForms[] = {"Whole bean", "Pre-ground"};
+  static const char *const grindSizes[] = {"Fine", "Medium-fine", "Medium", "Medium-coarse", "Coarse"};
+
+  if (!boundedString(coffeeBag["id"], 1, 64) || !boundedString(coffeeBag["name"], 1, 80) ||
+      !boundedString(coffeeBag["roastery"], 1, 80) || !calendarDate(coffeeBag["roastedOn"]) ||
+      !stringEqualsOneOf(coffeeBag["roastLevel"], roastLevels, 5) ||
+      !stringEqualsOneOf(coffeeBag["beanForm"], beanForms, 2)) {
+    error = "invalid_coffee_bag_identity";
+    return false;
+  }
+  const bool preGround = strcmp(coffeeBag["beanForm"].as<const char *>(), "Pre-ground") == 0;
+  if ((preGround && !stringEqualsOneOf(coffeeBag["grind"], grindSizes, 5)) ||
+      (!preGround && !coffeeBag["grind"].isNull())) {
+    error = "invalid_coffee_bag_grind";
+    return false;
+  }
+  if (!finiteInRange(coffeeBag["originalWeightG"], 0.1, 5000) ||
+      !finiteInRange(coffeeBag["remainingWeightG"], 0, 5000) ||
+      coffeeBag["remainingWeightG"].as<double>() > coffeeBag["originalWeightG"].as<double>()) {
+    error = "invalid_coffee_bag_weight";
+    return false;
+  }
+  if (!optionalRating(coffeeBag["acidity"]) || !optionalRating(coffeeBag["bitterness"]) ||
+      (!coffeeBag["altitudeM"].isNull() && !finiteInRange(coffeeBag["altitudeM"], 0, 5000)) ||
+      !boundedString(coffeeBag["origin"], 0, 80) || !boundedString(coffeeBag["farm"], 0, 80) ||
+      !boundedString(coffeeBag["createdAt"], 1, 40) || !boundedString(coffeeBag["updatedAt"], 1, 40) ||
+      !coffeeBag["tastingNotes"].is<JsonArrayConst>() || !coffeeBag["processing"].is<JsonArrayConst>()) {
+    error = "invalid_coffee_bag_details";
+    return false;
+  }
+  JsonArrayConst tastingNotes = coffeeBag["tastingNotes"].as<JsonArrayConst>();
+  JsonArrayConst processing = coffeeBag["processing"].as<JsonArrayConst>();
+  if (tastingNotes.size() > 3 || processing.size() > 3) {
+    error = "coffee_bag_detail_limit";
+    return false;
+  }
+  for (JsonVariantConst item : tastingNotes) {
+    if (!boundedString(item, 0, 40)) { error = "invalid_coffee_bag_tasting_note"; return false; }
+  }
+  for (JsonVariantConst item : processing) {
+    if (!boundedString(item, 1, 40)) { error = "invalid_coffee_bag_processing"; return false; }
+  }
+  return true;
+}
+
+bool UserDataStore::validCoffeeBagSnapshot(JsonObjectConst coffeeBag, String &error) const {
+  if (!boundedString(coffeeBag["id"], 1, 64) || !boundedString(coffeeBag["name"], 1, 80) ||
+      !boundedString(coffeeBag["roastery"], 1, 80) || !calendarDate(coffeeBag["roastedOn"]) ||
+      !finiteInRange(coffeeBag["originalWeightG"], 0.1, 5000)) {
+    error = "invalid_brew_coffee_bag";
+    return false;
+  }
+  return true;
+}
+
 bool UserDataStore::validBrew(JsonObjectConst brew, String &error) const {
   if (!boundedString(brew["id"], 1, 64) || !boundedString(brew["completed_at"], 1, 40) ||
       !finiteInRange(brew["elapsed_s"], 0, 3600) || !brew["recipe"].is<JsonObjectConst>() ||
@@ -191,6 +277,17 @@ bool UserDataStore::validBrew(JsonObjectConst brew, String &error) const {
     return false;
   }
   if (!validRecipe(brew["recipe"].as<JsonObjectConst>(), error)) return false;
+  if (!brew["coffee_bag"].isNull()) {
+    if (!brew["coffee_bag"].is<JsonObjectConst>() ||
+        !validCoffeeBagSnapshot(brew["coffee_bag"].as<JsonObjectConst>(), error) ||
+        !finiteInRange(brew["coffee_used_g"], 0.1, 80)) {
+      if (error.isEmpty()) error = "invalid_brew_coffee_bag";
+      return false;
+    }
+  } else if (!brew["coffee_used_g"].isNull()) {
+    error = "invalid_brew_coffee_bag";
+    return false;
+  }
   JsonObjectConst final = brew["final"].as<JsonObjectConst>();
   if (!finiteOrNull(final["upper_g"]) || !finiteOrNull(final["lower_g"]) ||
       !finiteOrNull(final["total_g"]) || (!final["beverage_g"].isNull() && !finiteOrNull(final["beverage_g"]))) {
@@ -263,7 +360,13 @@ bool UserDataStore::readRecipes(JsonDocument &output, String &error) const {
   return loadCollection(kRecipesPath, kMaxRecipesFile, output, error);
 }
 
+bool UserDataStore::readCoffeeBags(JsonDocument &output, String &error) const {
+  if (!recoverPendingCompletion(error)) return false;
+  return loadCollection(kCoffeeBagsPath, kMaxCoffeeBagsFile, output, error);
+}
+
 bool UserDataStore::readBrews(JsonDocument &output, size_t limit, String &error) const {
+  if (!recoverPendingCompletion(error)) return false;
   JsonDocument stored;
   if (!loadCollection(kBrewsPath, kMaxBrewsFile, stored, error)) return false;
   const uint32_t revision = stored["revision"].as<uint32_t>();
@@ -355,7 +458,98 @@ bool UserDataStore::deleteRecipe(const String &id, uint32_t baseRevision, JsonDo
   return true;
 }
 
+bool UserDataStore::upsertCoffeeBag(JsonObjectConst request, JsonDocument &output, int &status, String &error) {
+  if (!recoverPendingCompletion(error)) {
+    status = 500;
+    return false;
+  }
+  JsonDocument stored;
+  if (!loadCollection(kCoffeeBagsPath, kMaxCoffeeBagsFile, stored, error)) {
+    status = 500;
+    return false;
+  }
+  const uint32_t revision = stored["revision"].as<uint32_t>();
+  if (!validRevision(request, revision, status, error)) return false;
+  if (!request["coffee_bag"].is<JsonObjectConst>() ||
+      !validCoffeeBag(request["coffee_bag"].as<JsonObjectConst>(), error)) {
+    status = 422;
+    return false;
+  }
+
+  JsonArray items = stored["items"].as<JsonArray>();
+  const char *id = request["coffee_bag"]["id"].as<const char *>();
+  bool replaced = false;
+  for (JsonVariant item : items) {
+    if (strcmp(item["id"] | "", id) == 0) {
+      item.set(request["coffee_bag"]);
+      replaced = true;
+      break;
+    }
+  }
+  if (!replaced) {
+    if (items.size() >= kMaxCoffeeBags) {
+      status = 422;
+      error = "coffee_bag_limit_reached";
+      return false;
+    }
+    items.add(request["coffee_bag"]);
+  }
+  stored["revision"] = revision + 1;
+  if (!writeCollection(kCoffeeBagsPath, stored, error)) {
+    status = 507;
+    return false;
+  }
+  status = replaced ? 200 : 201;
+  copyCollectionEnvelope(output, revision + 1, items);
+  return true;
+}
+
+bool UserDataStore::deleteCoffeeBag(const String &id, uint32_t baseRevision, JsonDocument &output, int &status,
+                                    String &error) {
+  if (!recoverPendingCompletion(error)) {
+    status = 500;
+    return false;
+  }
+  JsonDocument stored;
+  if (!loadCollection(kCoffeeBagsPath, kMaxCoffeeBagsFile, stored, error)) {
+    status = 500;
+    return false;
+  }
+  const uint32_t revision = stored["revision"].as<uint32_t>();
+  if (baseRevision != revision) {
+    status = 409;
+    error = "revision_conflict";
+    return false;
+  }
+  JsonArray items = stored["items"].as<JsonArray>();
+  bool removed = false;
+  for (size_t index = 0; index < items.size(); ++index) {
+    if (id == (items[index]["id"] | "")) {
+      items.remove(index);
+      removed = true;
+      break;
+    }
+  }
+  if (!removed) {
+    status = 404;
+    error = "coffee_bag_not_found";
+    return false;
+  }
+  stored["revision"] = revision + 1;
+  if (!writeCollection(kCoffeeBagsPath, stored, error)) {
+    status = 507;
+    return false;
+  }
+  status = 200;
+  copyCollectionEnvelope(output, revision + 1, items);
+  return true;
+}
+
 bool UserDataStore::appendBrew(JsonObjectConst request, JsonDocument &output, int &status, String &error) {
+  if (!recoverPendingCompletion(error)) {
+    status = 500;
+    return false;
+  }
   if (!request["brew"].is<JsonObjectConst>() || !validBrew(request["brew"].as<JsonObjectConst>(), error)) {
     status = 422;
     return false;
@@ -402,7 +596,201 @@ bool UserDataStore::appendBrew(JsonObjectConst request, JsonDocument &output, in
   return true;
 }
 
+bool UserDataStore::writeCompletionJournal(const JsonDocument &document, String &error) const {
+  const size_t expected = measureJson(document);
+  if (expected == 0 || expected > kMaxCompletionJournalFile) {
+    error = "storage_limit_reached";
+    return false;
+  }
+  const String temporary = String(kCompletionJournalPath) + ".tmp";
+  LittleFS.remove(temporary);
+  File file = LittleFS.open(temporary, "w");
+  if (!file) {
+    error = "storage_unavailable";
+    return false;
+  }
+  const size_t written = serializeJson(document, file);
+  file.flush();
+  file.close();
+  if (written != expected) {
+    LittleFS.remove(temporary);
+    error = "storage_write_failed";
+    return false;
+  }
+  if (LittleFS.exists(kCompletionJournalPath) && !LittleFS.remove(kCompletionJournalPath)) {
+    LittleFS.remove(temporary);
+    error = "storage_write_failed";
+    return false;
+  }
+  if (!LittleFS.rename(temporary, kCompletionJournalPath)) {
+    LittleFS.remove(temporary);
+    error = "storage_write_failed";
+    return false;
+  }
+  return true;
+}
+
+bool UserDataStore::recoverPendingCompletion(String &error) const {
+  if (!LittleFS.exists(kCompletionJournalPath)) return true;
+  File file = LittleFS.open(kCompletionJournalPath, "r");
+  if (!file || file.size() == 0 || file.size() > kMaxCompletionJournalFile) {
+    if (file) file.close();
+    error = "completion_recovery_failed";
+    return false;
+  }
+  JsonDocument journal;
+  const DeserializationError parseError = deserializeJson(journal, file);
+  file.close();
+  if (parseError || journal["v"].as<int>() != 1 || !journal["brews"].is<JsonObjectConst>() ||
+      !journal["coffee_bags"].is<JsonObjectConst>()) {
+    error = "completion_recovery_failed";
+    return false;
+  }
+  JsonDocument brews;
+  JsonDocument coffeeBags;
+  brews.set(journal["brews"]);
+  coffeeBags.set(journal["coffee_bags"]);
+  if (!writeCollection(kCoffeeBagsPath, coffeeBags, error) ||
+      !writeCollection(kBrewsPath, brews, error)) {
+    return false;
+  }
+  const String removedTraceId = journal["removed_trace_id"] | "";
+  if (!removedTraceId.isEmpty()) removeTrace(removedTraceId);
+  if (!LittleFS.remove(kCompletionJournalPath)) {
+    error = "completion_recovery_failed";
+    return false;
+  }
+  return true;
+}
+
+bool UserDataStore::completeBrew(JsonObjectConst request, JsonDocument &output, int &status, String &error) {
+  if (!recoverPendingCompletion(error)) {
+    status = 500;
+    return false;
+  }
+  if (!request["brew"].is<JsonObjectConst>() || !validBrew(request["brew"].as<JsonObjectConst>(), error)) {
+    status = 422;
+    return false;
+  }
+  JsonObjectConst brew = request["brew"].as<JsonObjectConst>();
+  const String requestedId = brew["id"].as<const char *>();
+  if (!brew["trace"].isNull() &&
+      !LittleFS.exists(String(kTracesPath) + "/" + requestedId + ".pftr")) {
+    status = 422;
+    error = "trace_not_found";
+    return false;
+  }
+
+  JsonDocument brews;
+  JsonDocument coffeeBags;
+  if (!loadCollection(kBrewsPath, kMaxBrewsFile, brews, error) ||
+      !loadCollection(kCoffeeBagsPath, kMaxCoffeeBagsFile, coffeeBags, error)) {
+    status = 500;
+    return false;
+  }
+
+  JsonArray brewItems = brews["items"].as<JsonArray>();
+  for (JsonVariantConst item : brewItems) {
+    if (strcmp(item["id"] | "", requestedId.c_str()) == 0) {
+      output.clear();
+      output["v"] = 1;
+      output["brews"].set(brews);
+      output["coffee_bags"].set(coffeeBags);
+      status = 200;
+      return true;
+    }
+  }
+
+  String inventoryWarning;
+  bool coffeeBagsChanged = false;
+  if (!request["coffee_bag_use"].isNull()) {
+    if (!request["coffee_bag_use"].is<JsonObjectConst>()) {
+      status = 422;
+      error = "invalid_coffee_bag_use";
+      return false;
+    }
+    JsonObjectConst use = request["coffee_bag_use"].as<JsonObjectConst>();
+    if (!boundedString(use["bag_id"], 1, 64) || !finiteInRange(use["dose_g"], 0.1, 80) ||
+        !use["base_revision"].is<uint32_t>()) {
+      status = 422;
+      error = "invalid_coffee_bag_use";
+      return false;
+    }
+    if (use["base_revision"].as<uint32_t>() != coffeeBags["revision"].as<uint32_t>()) {
+      status = 409;
+      error = "revision_conflict";
+      return false;
+    }
+    if (!brew["coffee_bag"].is<JsonObjectConst>() ||
+        strcmp(brew["coffee_bag"]["id"] | "", use["bag_id"] | "") != 0) {
+      status = 422;
+      error = "coffee_bag_use_mismatch";
+      return false;
+    }
+    JsonArray bagItems = coffeeBags["items"].as<JsonArray>();
+    JsonObject selectedBag;
+    for (JsonVariant item : bagItems) {
+      if (strcmp(item["id"] | "", use["bag_id"] | "") == 0) {
+        selectedBag = item.as<JsonObject>();
+        break;
+      }
+    }
+    if (selectedBag.isNull()) {
+      inventoryWarning = "coffee_bag_not_found";
+    } else {
+      selectedBag["remainingWeightG"] =
+          max(0.0, selectedBag["remainingWeightG"].as<double>() - use["dose_g"].as<double>());
+      selectedBag["updatedAt"] = brew["completed_at"].as<const char *>();
+      coffeeBags["revision"] = coffeeBags["revision"].as<uint32_t>() + 1;
+      coffeeBagsChanged = true;
+    }
+  }
+
+  brewItems.add(brew);
+  for (size_t index = brewItems.size(); index > 1; --index) brewItems[index - 1].set(brewItems[index - 2]);
+  brewItems[0].set(brew);
+  String removedId;
+  if (brewItems.size() > kMaxBrews) {
+    removedId = brewItems[brewItems.size() - 1]["id"] | "";
+    brewItems.remove(brewItems.size() - 1);
+  }
+  brews["revision"] = brews["revision"].as<uint32_t>() + 1;
+
+  JsonDocument journal;
+  journal["v"] = 1;
+  journal["brews"].set(brews);
+  journal["coffee_bags"].set(coffeeBags);
+  if (!removedId.isEmpty()) journal["removed_trace_id"] = removedId;
+  if (!writeCompletionJournal(journal, error)) {
+    status = 507;
+    return false;
+  }
+  if ((coffeeBagsChanged && !writeCollection(kCoffeeBagsPath, coffeeBags, error)) ||
+      !writeCollection(kBrewsPath, brews, error)) {
+    status = 507;
+    return false;
+  }
+  if (!removedId.isEmpty()) removeTrace(removedId);
+  if (!LittleFS.remove(kCompletionJournalPath)) {
+    status = 507;
+    error = "completion_recovery_failed";
+    return false;
+  }
+
+  output.clear();
+  output["v"] = 1;
+  output["brews"].set(brews);
+  output["coffee_bags"].set(coffeeBags);
+  if (!inventoryWarning.isEmpty()) output["inventory_warning"] = inventoryWarning;
+  status = 201;
+  return true;
+}
+
 bool UserDataStore::clearBrews(uint32_t baseRevision, JsonDocument &output, int &status, String &error) {
+  if (!recoverPendingCompletion(error)) {
+    status = 500;
+    return false;
+  }
   JsonDocument stored;
   if (!loadCollection(kBrewsPath, kMaxBrewsFile, stored, error)) {
     status = 500;

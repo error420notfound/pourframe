@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildSchedule, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
+import { buildSchedule, expectedRecipeYield, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
+import { createCoffeeBag, filterCoffeeBags, normalizeCoffeeBag, snapshotCoffeeBag, sortCoffeeBags, validateCoffeeBag } from './coffeeBag'
 import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
 import { tareBothScales } from './brewSession'
@@ -49,6 +50,48 @@ describe('recipe semantics', () => {
     const legacy = { ...defaultRecipes[0], poursAfterBloom: undefined, pours: 4 } as unknown as typeof defaultRecipes[number]
     expect(migrateRecipe(legacy).poursAfterBloom).toBe(4)
     expect(validateRecipe({ ...defaultRecipes[0], bloom: 320 }).errors.bloom).toBeTruthy()
+  })
+
+  it('calculates expected yield from the precise coffee and ratio values', () => {
+    const recipe = updateRecipeNumber({ ...defaultRecipes[0] }, 'coffee', 20.25)
+    expect(expectedRecipeYield(recipe)).toBe(20.25 * recipe.ratio)
+    expect(expectedRecipeYield(recipe)).toBe(recipe.water)
+  })
+})
+
+describe('coffee bag inventory', () => {
+  it('validates required identity, weights, and conditional pre-ground size', () => {
+    const bag = { ...createCoffeeBag(), name: 'Ethiopia Buku', roastery: 'Local Roaster' }
+    expect(validateCoffeeBag(bag).valid).toBe(true)
+    expect(validateCoffeeBag({ ...bag, beanForm: 'Pre-ground', grind: undefined }).errors.grind).toBeTruthy()
+    expect(validateCoffeeBag({ ...bag, remainingWeightG: 251 }).errors.remainingWeightG).toBeTruthy()
+    expect(validateCoffeeBag({ ...bag, acidity: 5 }).errors.ratings).toBeTruthy()
+  })
+
+  it('normalizes bounded optional details and snapshots without mutable inventory', () => {
+    const bag = normalizeCoffeeBag({
+      ...createCoffeeBag(),
+      name: '  House roast  ',
+      roastery: '  PourFrame Coffee  ',
+      tastingNotes: ['Berry', 'Cocoa', 'Floral', 'Extra'],
+      processing: ['Washed', 'Fermented', 'Sun-dried', 'Extra'],
+    })
+    expect(bag.name).toBe('House roast')
+    expect(bag.tastingNotes).toEqual(['Berry', 'Cocoa', 'Floral'])
+    expect(bag.processing).toEqual(['Washed', 'Fermented', 'Sun-dried'])
+    expect(snapshotCoffeeBag(bag)).not.toHaveProperty('remainingWeightG')
+  })
+
+  it('keeps active bags first and supports filtering and stable sort choices', () => {
+    const base = { ...createCoffeeBag(), roastery: 'Roaster' }
+    const bags = [
+      { ...base, id: 'fresh', name: 'Fresh', roastedOn: '2026-07-20', remainingWeightG: 200 },
+      { ...base, id: 'old', name: 'Old', roastedOn: '2026-07-01', remainingWeightG: 80 },
+      { ...base, id: 'empty', name: 'Empty', roastedOn: '2026-06-01', remainingWeightG: 0 },
+    ]
+    expect(sortCoffeeBags(bags, 'roast-oldest').map((bag) => bag.id)).toEqual(['old', 'fresh', 'empty'])
+    expect(sortCoffeeBags(bags, 'remaining-high').map((bag) => bag.id)).toEqual(['fresh', 'old', 'empty'])
+    expect(filterCoffeeBags(bags, 'depleted').map((bag) => bag.id)).toEqual(['empty'])
   })
 })
 

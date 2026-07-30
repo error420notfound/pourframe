@@ -2,7 +2,7 @@
 
 Pourframe is a local-first dual-scale coffee weighing controller for the Vicharak Shrike-Fi (ESP32-S3). It reads two independent HX711 converters, serves a responsive web interface from LittleFS, provisions Wi-Fi through a captive portal, and publishes telemetry over WebSocket.
 
-The hosted application also provides shared recipes, guided brew preparation, acknowledged device tare/target setup, partial-scale and timer-only fallbacks, a live brewing timer, and completed brew summaries. All runtime assets and data stay on the local device; the application has no cloud or CDN dependency.
+The hosted application also provides shared recipes, coffee-bag inventory, guided brew preparation, acknowledged device tare/target setup, partial-scale and timer-only fallbacks, a live brewing timer, and completed brew summaries. All runtime assets and data stay on the local device; the application has no cloud or CDN dependency.
 
 Measurement acquisition runs in a dedicated paired-reader task. A hardware-independent pipeline provides median spike rejection, calibration validity, slope/range history, stable/active/drawdown/uncertain states, a common time-normalized EMA, total conservation, health diagnostics, and confidence. See [the measurement pipeline guide](docs/measurement-pipeline.md) for capture, replay, calibration, and physical release gates.
 
@@ -58,20 +58,24 @@ The calibration protocol stores reference weights in grams. The web interface ac
 converts kilograms to grams before sending the calibration command. After calibrating with the wrong unit, tare and
 recalibrate that channel; the new factor replaces the previously stored factor.
 
-## Shared recipes and brew history
+## Shared coffee bags, recipes, and brew history
 
-Recipes and completed brew summaries are stored as bounded, revisioned JSON collections under `/user` in LittleFS. Writes use a temporary file and rename, duplicate brew IDs are idempotent, corrupt collections are quarantined with a `.corrupt` suffix, and the filesystem is never automatically formatted after a mount failure.
+Coffee bags, recipes, and completed brew summaries are stored as bounded, revisioned JSON collections under `/user` in LittleFS. Writes use a temporary file and rename, duplicate brew IDs are idempotent, corrupt collections are quarantined with a `.corrupt` suffix, and the filesystem is never automatically formatted after a mount failure. Brew completion uses a recoverable journal so a selected bag's remaining weight and the completed brew cannot be committed as unrelated operations.
 
 The versioned local API is:
 
 - `GET /api/recipes`
 - `POST /api/recipes` with `{ "v": 1, "base_revision": n, "recipe": { ... } }`
 - `DELETE /api/recipes?id=...&base_revision=n`
+- `GET /api/coffee-bags`
+- `POST /api/coffee-bags` with `{ "v": 1, "base_revision": n, "coffee_bag": { ... } }`
+- `DELETE /api/coffee-bags?id=...&base_revision=n`
 - `GET /api/brews?limit=5`
 - `POST /api/brews` with `{ "v": 1, "brew": { ... } }`
+- `POST /api/brew-completions` with `{ "v": 1, "brew": { ... }, "coffee_bag_use": { "bag_id": "...", "dose_g": 20, "base_revision": n } }`; `coffee_bag_use` may be `null`
 - `DELETE /api/brews?confirm=clear&base_revision=n`
 
-The device stores at most 24 recipes and the five newest completed brews. Each completed device-assisted brew has a versioned, checksum-validated 10 Hz binary trace containing absolute upper/lower/combined measurements, virtual step-relative values, pour rate, step index, and health flags. Browser `localStorage` is reserved for interface preferences; IndexedDB contains a last-good cache and an outbox for a completion record and trace that could not immediately reach the ESP32.
+The device stores at most 24 coffee bags, 24 recipes, and the five newest completed brews. Each completed device-assisted brew has a versioned, checksum-validated 10 Hz binary trace containing absolute upper/lower/combined measurements, virtual step-relative values, pour rate, step index, and health flags. Browser `localStorage` is reserved for small versioned interface preferences; IndexedDB contains last-good collection caches and an outbox for a completion record, trace, and intended inventory deduction that could not immediately reach the ESP32.
 
 Trace transfer is additive to the version 1 API:
 
