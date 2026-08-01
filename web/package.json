@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/precompress.mjs",
     "lint": "tsc -b --pretty false",
-    "test": "vitest run && node --test scripts/precompress.node-test.mjs",
+    "test": "vitest run && node --test scripts/precompress.node-test.mjs scripts/service-worker.node-test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

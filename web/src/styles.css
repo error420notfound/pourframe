@@ -904,11 +904,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .appliance-actions { justify-self: end; display: flex; align-items: center; gap: 8px; }
 .appliance-actions > button { width: 40px; height: 40px; padding: 10px; border: 1px solid var(--app-line); border-radius: 12px; background: var(--app-surface); color: var(--app-text); }
+.appliance-actions > .install-app { width: auto; padding: 0 12px; display: inline-flex; align-items: center; gap: 7px; font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.appliance-actions > .install-app svg { width: 16px; height: 16px; }
 .appliance-actions svg { width: 100%; height: 100%; }
 .appliance-connection { min-height: 36px; padding: 0 11px; border: 1px solid var(--app-line); border-radius: 999px; display: inline-flex; align-items: center; gap: 7px; color: var(--app-muted); font-size: 0.74rem; font-weight: 650; white-space: nowrap; }
 .appliance-connection i { width: 7px; height: 7px; border-radius: 50%; background: #d15245; }
 .appliance-connection.online { color: var(--app-accent); background: var(--app-accent-soft); }
 .appliance-connection.online i { background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 15%, transparent); }
+
+.device-status-banner { position: sticky; z-index: 19; top: 76px; min-height: 58px; padding: 9px clamp(20px, 4vw, 64px); border-bottom: 1px solid color-mix(in srgb, #a33a32 28%, var(--app-line)); display: flex; align-items: center; justify-content: space-between; gap: 18px; background: color-mix(in srgb, #fff0ee 94%, var(--app-bg)); color: #7d251f; }
+.device-status-banner > div { display: grid; gap: 2px; }
+.device-status-banner strong { font-size: .82rem; }
+.device-status-banner span, .device-status-banner small { font-size: .72rem; line-height: 1.35; }
+.device-status-banner small { font-weight: 700; }
+.device-status-banner--connecting, .device-status-banner--partial { border-bottom-color: color-mix(in srgb, #9c7100 28%, var(--app-line)); background: color-mix(in srgb, #fff7d6 94%, var(--app-bg)); color: #684d00; }
+.device-status-banner__action { min-height: 36px; padding: 0 12px; border: 1px solid currentColor; border-radius: 10px; display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; background: transparent; color: inherit; font-size: .74rem; font-weight: 750; }
+.device-status-banner__action svg { width: 15px; height: 15px; }
 
 .appliance-body { width: min(1420px, 100%); min-width: 0; margin: 0 auto; padding: clamp(24px, 4vw, 58px); }
 .legacy-banner, .library-status { min-height: 44px; padding: 8px clamp(20px, 4vw, 64px); display: flex; align-items: center; justify-content: center; gap: 16px; border-bottom: 1px solid var(--app-line); background: #fff7d6; color: #684d00; font-size: 0.82rem; }
@@ -1251,7 +1262,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 @media (max-width: 640px) {
-  .appliance-header { min-height: 68px; padding: 0 16px; gap: 10px; background: var(--app-bg); backdrop-filter: none; }.brand small, .appliance-connection { display: none; }.brand > span { width: 34px; height: 34px; }.appliance-actions > button { width: 38px; height: 38px; }
+  .appliance-header { min-height: 68px; padding: 0 16px; gap: 10px; background: var(--app-bg); backdrop-filter: none; }.brand small, .appliance-connection { display: none; }.brand > span { width: 34px; height: 34px; }.appliance-actions > button { width: 38px; height: 38px; }.appliance-actions > .install-app { width: 38px; padding: 10px; }.install-app span { display: none; }
+  .device-status-banner { top: 68px; padding: 10px 16px; align-items: flex-start; }.device-status-banner span { font-size: .68rem; }.device-status-banner__action { min-height: 34px; padding: 0 9px; }
   .appliance-header nav { padding: 5px; gap: 2px; }.appliance-header nav a { min-width: 0; padding: 0 6px; flex-direction: column; gap: 2px; font-size: .62rem; }.appliance-header nav a svg { width: 17px; height: 17px; }
   .appliance-body { padding: 18px 14px 96px; }.brew-layout { gap: 14px; }.brew-hero, .brew-readings, .brew-guide, .history-workspace { border-radius: 18px; }
   .brew-hero { min-height: 0; padding: 24px 20px; grid-template-columns: 1fr; gap: 24px; }.brew-hero h2 { font-size: 2.5rem; }.brew-timer { min-width: 0; text-align: left; }.brew-timer strong { font-size: 5.2rem; }.brew-key-metrics { grid-template-columns: 1fr 1fr; }.brew-key-metrics > div:last-child { grid-column: 1 / -1; }.brew-actions { display: grid; grid-template-columns: 1fr 1fr; }.brew-actions .brew-primary { grid-column: 1 / -1; min-height: 54px; }.brew-actions .brew-secondary { min-height: 48px; }.brew-readings { padding: 22px 20px; }.brew-readings__primary strong { font-size: 4.1rem; }.brew-guide { padding: 24px 20px; gap: 24px; }.brew-guide h3 { font-size: 3rem; }

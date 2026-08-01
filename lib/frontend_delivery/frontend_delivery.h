@@ -19,6 +19,7 @@ enum class RequestTarget {
 
 bool acceptsGzip(const char *acceptEncoding);
 const char *contentTypeForPath(const char *path);
+const char *cacheControlForPath(const char *path, bool spaFallback);
 Representation selectRepresentation(bool rawExists, bool gzipExists, bool gzipAccepted);
 RequestTarget classifyRequest(const char *path, bool exactAssetExists);
 

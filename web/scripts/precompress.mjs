@@ -1,9 +1,11 @@
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { gzipSync } from 'node:zlib'
 
-const COMPRESSIBLE_EXTENSIONS = new Set(['.html', '.js', '.css', '.json', '.svg'])
+const COMPRESSIBLE_EXTENSIONS = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest'])
+const CACHE_VERSION_TOKEN = '__POURFRAME_CACHE_VERSION__'
 
 export function shouldCompress(filePath) {
   return !filePath.toLowerCase().endsWith('.gz') && COMPRESSIBLE_EXTENSIONS.has(path.extname(filePath).toLowerCase())
@@ -24,8 +26,35 @@ async function filesRecursively(directory) {
   return files
 }
 
+export async function stampServiceWorker(directory) {
+  const root = path.resolve(directory)
+  const serviceWorkerPath = path.join(root, 'sw.js')
+  let source
+  try {
+    source = await readFile(serviceWorkerPath, 'utf8')
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null
+    throw error
+  }
+  if (!source.includes(CACHE_VERSION_TOKEN)) throw new Error(`sw.js is missing ${CACHE_VERSION_TOKEN}`)
+
+  const hash = createHash('sha256')
+  const files = await filesRecursively(root)
+  for (const file of files) {
+    if (file === serviceWorkerPath) continue
+    hash.update(path.relative(root, file).split(path.sep).join('/'))
+    hash.update('\0')
+    hash.update(await readFile(file))
+    hash.update('\0')
+  }
+  const version = hash.digest('hex').slice(0, 16)
+  await writeFile(serviceWorkerPath, source.replaceAll(CACHE_VERSION_TOKEN, version))
+  return version
+}
+
 export async function precompressDirectory(directory) {
   const root = path.resolve(directory)
+  await stampServiceWorker(root)
   const sourceFiles = await filesRecursively(root)
   const assets = []
 

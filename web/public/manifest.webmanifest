@@ -1,0 +1,24 @@
+{
+  "name": "PourFrame",
+  "short_name": "PourFrame",
+  "description": "Local-first guided coffee brewing with live PourFrame scale telemetry.",
+  "start_url": "./#brew",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/pourover-icon-master.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

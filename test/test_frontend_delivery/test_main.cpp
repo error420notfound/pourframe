@@ -36,8 +36,23 @@ void testMimeTypes() {
   expect(strcmp(frontend_delivery::contentTypeForPath("/assets/app.js"), "text/javascript") == 0, "JavaScript MIME type");
   expect(strcmp(frontend_delivery::contentTypeForPath("/assets/app.css"), "text/css") == 0, "CSS MIME type");
   expect(strcmp(frontend_delivery::contentTypeForPath("/manifest.json"), "application/json") == 0, "JSON MIME type");
+  expect(strcmp(frontend_delivery::contentTypeForPath("/manifest.webmanifest"), "application/manifest+json") == 0,
+         "web manifest MIME type");
   expect(strcmp(frontend_delivery::contentTypeForPath("/logo.svg"), "image/svg+xml") == 0, "SVG MIME type");
   expect(strcmp(frontend_delivery::contentTypeForPath("/font.woff2"), "font/woff2") == 0, "WOFF2 MIME type");
+}
+
+void testCacheControl() {
+  expect(strcmp(frontend_delivery::cacheControlForPath("/index.html", false), "no-cache") == 0,
+         "index remains refreshable");
+  expect(strcmp(frontend_delivery::cacheControlForPath("/sw.js", false), "no-cache") == 0,
+         "service worker remains refreshable");
+  expect(strcmp(frontend_delivery::cacheControlForPath("/manifest.webmanifest", false), "no-cache") == 0,
+         "manifest remains refreshable");
+  expect(strcmp(frontend_delivery::cacheControlForPath("/assets/app.js", true), "no-cache") == 0,
+         "SPA fallback remains refreshable");
+  expect(strcmp(frontend_delivery::cacheControlForPath("/assets/app.js", false), "max-age=3600") == 0,
+         "static assets retain bounded caching");
 }
 
 void testRepresentationSelection() {
@@ -50,6 +65,9 @@ void testRepresentationSelection() {
 void testRequestClassification() {
   expect(frontend_delivery::classifyRequest("/", false) == RequestTarget::Root, "root maps to index");
   expect(frontend_delivery::classifyRequest("/assets/app.js", true) == RequestTarget::ExactAsset, "existing asset is exact");
+  expect(frontend_delivery::classifyRequest("/sw.js", true) == RequestTarget::ExactAsset, "service worker remains exact");
+  expect(frontend_delivery::classifyRequest("/manifest.webmanifest", true) == RequestTarget::ExactAsset,
+         "web manifest remains exact");
   expect(frontend_delivery::classifyRequest("/brew/session", false) == RequestTarget::SpaFallback, "client route uses SPA fallback");
   expect(frontend_delivery::classifyRequest("/api/missing", false) == RequestTarget::Api, "API path is excluded");
   expect(frontend_delivery::classifyRequest("/assets/app.js.gz", true) == RequestTarget::DirectGzip, "direct gzip URL is rejected");
@@ -58,6 +76,7 @@ void testRequestClassification() {
 void runAll() {
   testGzipNegotiation();
   testMimeTypes();
+  testCacheControl();
   testRepresentationSelection();
   testRequestClassification();
 }

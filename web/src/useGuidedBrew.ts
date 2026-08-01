@@ -30,6 +30,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
   const [elapsedMs, setElapsedMs] = useState(0)
   const [prepStage, setPrepStage] = useState<'confirm' | 'working' | 'ready' | 'timer' | null>(null)
   const [message, setMessage] = useState('')
+  const [deviceBlocked, setDeviceBlocked] = useState(false)
   const [physicalCue, setPhysicalCue] = useState<PhysicalCueState>('ready')
   const physicalCueRef = useRef(physicalCue)
   const telemetryRef = useRef(telemetry)
@@ -169,6 +170,30 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
     if (state === 'active' || state === 'completed' || state === 'cancelled' || state === 'health_aborted' || state === 'unavailable') updatePhysicalCue(state)
   }, [telemetry?.led?.cue_state, updatePhysicalCue])
 
+  useEffect(() => {
+    if (machine.mode !== 'device') return
+    const liveAuthority = connection === 'online' && completePairedTelemetry(telemetry)
+    const activePhase = machine.phase === 'POUR_ACTIVE' || machine.phase === 'STEP_COUNTDOWN' ||
+      machine.phase === 'WAITING_FOR_STABLE_BASELINE' || machine.phase === 'DRAWDOWN'
+    if (!liveAuthority && activePhase && !deviceBlocked) {
+      if (machine.phase === 'STEP_COUNTDOWN' || machine.phase === 'WAITING_FOR_STABLE_BASELINE') {
+        pausedStep.current = pendingStep.current?.index ?? Math.max(0, machine.currentStepIndex + 1)
+      }
+      const cueId = machine.activeCueId
+      if (cueId) void sendOnce(`cancel:${cueId}`, { command: 'brew_step_cue_cancel', cue_id: cueId }).catch(() => undefined)
+      clearCountdown()
+      pausedAt.current = performance.now()
+      updatePhysicalCue('unavailable')
+      setDeviceBlocked(true)
+      setMessage('PourFrame device offline. The scale-controlled brew is paused; reconnect or continue timer-only.')
+      event({ type: 'PAUSE' })
+      return
+    }
+    if (liveAuthority && deviceBlocked && machine.phase === 'PAUSED') {
+      setMessage('PourFrame reconnected with valid paired telemetry. Resume when you are ready.')
+    }
+  }, [clearCountdown, connection, deviceBlocked, event, machine.activeCueId, machine.currentStepIndex, machine.mode, machine.phase, sendOnce, telemetry, updatePhysicalCue])
+
   const prepare = useCallback(async () => {
     const validation = validateRecipe(recipe)
     if (!validation.valid) { setMessage(Object.values(validation.errors)[0] ?? 'Recipe is invalid.'); setPrepStage('confirm'); return }
@@ -202,29 +227,47 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
     const brewId = machineRef.current.brewId || createId('brew')
     if (machineRef.current.phase !== 'PREPARING' && machineRef.current.phase !== 'ERROR') event({ type: 'PREPARE', brewId })
     if (machineRef.current.phase === 'ERROR') { machineRef.current = { ...initialBrewMachine(), phase: 'PREPARING', brewId }; setMachine(machineRef.current) }
-    event({ type: 'PREPARED', mode: 'timer_only' }); setPrepStage(null); setMessage('Timer-only brew started. Scale readings will not be recorded.'); saved.current = false; trace.current!.clear(); summary.current = newSensorSummary('timer_only')
+    event({ type: 'PREPARED', mode: 'timer_only' }); setDeviceBlocked(false); setPrepStage(null); setMessage('Timer-only brew started. Scale readings will not be recorded.'); saved.current = false; trace.current!.clear(); summary.current = newSensorSummary('timer_only')
     const step = schedule[0]
     if (step?.kind === 'pour') activate(0, `${machineRef.current.brewId}:${step.id}`, 'automatic')
   }, [activate, coffeeBag, event, schedule])
 
   const continueTimerOnly = useCallback(() => {
     const pending = pendingStep.current
-    if (machineRef.current.phase !== 'WAITING_FOR_STABLE_BASELINE' || !pending) return
+    const continuingBlockedBrew = deviceBlocked && machineRef.current.phase === 'PAUSED'
+    if (!continuingBlockedBrew && (machineRef.current.phase !== 'WAITING_FOR_STABLE_BASELINE' || !pending)) return
     machineRef.current = { ...machineRef.current, mode: 'timer_only', reducedConfidence: true }
     setMachine(machineRef.current)
     summary.current = { ...summary.current, mode: 'timer_only' }
-    setMessage('Continuing timer-only. This transition is recorded as missed with reduced confidence.')
-    activate(pending.index, pending.transitionId, pending.source)
-    pendingStep.current = null
-  }, [activate])
-
-  const pauseResume = useCallback(() => {
-    if (machineRef.current.phase === 'PAUSED') {
+    setDeviceBlocked(false)
+    setMessage('Continuing timer-only with reduced confidence. Live scale readings will not be recorded.')
+    if (continuingBlockedBrew) {
       if (pausedAt.current != null) pausedTotal.current += performance.now() - pausedAt.current
       pausedAt.current = null
       const restart = pausedStep.current
       event({ type: 'RESUME' })
       if (restart != null) { pausedStep.current = null; beginCountdown(restart, machineRef.current.countdownGeneration) }
+      return
+    }
+    activate(pending!.index, pending!.transitionId, pending!.source)
+    pendingStep.current = null
+  }, [activate, beginCountdown, deviceBlocked, event])
+
+  const pauseResume = useCallback(() => {
+    if (machineRef.current.phase === 'PAUSED') {
+      if (deviceBlocked && machineRef.current.mode === 'device' &&
+          (connection !== 'online' || !completePairedTelemetry(telemetryRef.current))) {
+        setMessage('Waiting for valid paired telemetry. Reconnect PourFrame or continue timer-only.')
+        return
+      }
+      if (pausedAt.current != null) pausedTotal.current += performance.now() - pausedAt.current
+      pausedAt.current = null
+      const resumedAfterDeviceLoss = deviceBlocked
+      setDeviceBlocked(false)
+      const restart = pausedStep.current
+      event({ type: 'RESUME' })
+      if (restart != null) { pausedStep.current = null; beginCountdown(restart, machineRef.current.countdownGeneration) }
+      if (resumedAfterDeviceLoss) setMessage('Brew resumed with valid live telemetry.')
       return
     }
     if (machineRef.current.phase === 'STEP_COUNTDOWN' || machineRef.current.phase === 'WAITING_FOR_STABLE_BASELINE') {
@@ -234,13 +277,13 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
       updatePhysicalCue('cancelled')
     }
     clearCountdown(); pausedAt.current = performance.now(); event({ type: 'PAUSE' })
-  }, [beginCountdown, clearCountdown, event, sendOnce, updatePhysicalCue])
+  }, [beginCountdown, clearCountdown, connection, deviceBlocked, event, sendOnce, updatePhysicalCue])
 
   const reset = useCallback(() => {
     const cueId = machineRef.current.activeCueId
     if (cueId) void sendOnce(`cancel:${cueId}`, { command: 'brew_step_cue_cancel', cue_id: cueId }).catch(() => undefined)
     void sendProtocolCommand({ command: 'brew_step_clear' }).catch(() => undefined)
-    clearCountdown(); clockStartedAt.current = null; pausedAt.current = null; pausedTotal.current = 0; pendingStep.current = null; brewCoffeeBag.current = null; trace.current!.clear(); summary.current = newSensorSummary('device'); setElapsedMs(0); setPrepStage(null); setMessage(''); updatePhysicalCue('ready'); event({ type: 'RESET' })
+    clearCountdown(); clockStartedAt.current = null; pausedAt.current = null; pausedTotal.current = 0; pausedStep.current = null; pendingStep.current = null; brewCoffeeBag.current = null; trace.current!.clear(); summary.current = newSensorSummary('device'); setDeviceBlocked(false); setElapsedMs(0); setPrepStage(null); setMessage(''); updatePhysicalCue('ready'); event({ type: 'RESET' })
   }, [clearCountdown, event, sendOnce, sendProtocolCommand, updatePhysicalCue])
 
   const finish = useCallback(async () => {
@@ -273,5 +316,5 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
 
   const status: BrewStatus = machine.phase === 'IDLE' || machine.phase === 'ERROR' ? 'idle' : machine.phase === 'PREPARING' || machine.phase === 'READY' ? 'preparing' : machine.phase === 'PAUSED' ? 'paused' : machine.phase === 'COMPLETE' ? 'complete' : 'brewing'
   const baseline = machine.baselines[machine.baselines.length - 1]
-  return { machine, status, elapsed: elapsedMs / 1000, schedule, traceBuffer: trace.current, prepStage, setPrepStage, message, physicalCue, relative: relativeReadings(telemetry, baseline), prepare, startPrepared, startTimerOnly, continueTimerOnly, pauseResume, reset, finish, manualAdvance }
+  return { machine, status, elapsed: elapsedMs / 1000, schedule, traceBuffer: trace.current, prepStage, setPrepStage, message, physicalCue, deviceBlocked, relative: relativeReadings(telemetry, baseline), prepare, startPrepared, startTimerOnly, continueTimerOnly, pauseResume, reset, finish, manualAdvance }
 }

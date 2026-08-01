@@ -134,7 +134,7 @@ void sendFrontendFile(AsyncWebServerRequest *request, const String &browserPath,
       request->beginResponse(file, browserPath, frontend_delivery::contentTypeForPath(browserPath.c_str()));
   if (gzip) response->addHeader("Content-Encoding", "gzip", true);
   response->addHeader("Vary", "Accept-Encoding", true);
-  response->addHeader("Cache-Control", spaFallback ? "no-cache" : "max-age=3600", true);
+  response->addHeader("Cache-Control", frontend_delivery::cacheControlForPath(browserPath.c_str(), spaFallback), true);
   request->send(response);
 }
 

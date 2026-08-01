@@ -224,6 +224,15 @@ describe('device preparation and virtual baselines', () => {
     expect(state.countdownGeneration).toBe(3)
   })
 
+  it('returns an interrupted drawdown to drawdown after explicit resume', () => {
+    let state: BrewMachineState = { ...initialBrewMachine(), phase: 'DRAWDOWN', currentStepIndex: 2 }
+    state = reduceBrewMachine(state, { type: 'PAUSE' })
+    expect(state.phase).toBe('PAUSED')
+    expect(state.pausedFrom).toBe('DRAWDOWN')
+    state = reduceBrewMachine(state, { type: 'RESUME' })
+    expect(state.phase).toBe('DRAWDOWN')
+  })
+
   it('resets transient state without inventing another preparation', () => {
     const dirty: BrewMachineState = { ...initialBrewMachine(), phase: 'ERROR', brewId: 'brew-1', error: 'tare failed', activeCueId: 'cue-1' }
     expect(reduceBrewMachine(dirty, { type: 'RESET' })).toEqual(initialBrewMachine())

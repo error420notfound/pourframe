@@ -94,12 +94,19 @@ const char *contentTypeForPath(const char *path) {
   if (endsWithIgnoreCase(path, ".js") || endsWithIgnoreCase(path, ".mjs")) return "text/javascript";
   if (endsWithIgnoreCase(path, ".css")) return "text/css";
   if (endsWithIgnoreCase(path, ".json")) return "application/json";
+  if (endsWithIgnoreCase(path, ".webmanifest")) return "application/manifest+json";
   if (endsWithIgnoreCase(path, ".svg")) return "image/svg+xml";
   if (endsWithIgnoreCase(path, ".woff2")) return "font/woff2";
   if (endsWithIgnoreCase(path, ".png")) return "image/png";
   if (endsWithIgnoreCase(path, ".jpg") || endsWithIgnoreCase(path, ".jpeg")) return "image/jpeg";
   if (endsWithIgnoreCase(path, ".webp")) return "image/webp";
   return "application/octet-stream";
+}
+
+const char *cacheControlForPath(const char *path, bool spaFallback) {
+  if (spaFallback || endsWithIgnoreCase(path, "/index.html") || endsWithIgnoreCase(path, "/sw.js") ||
+      endsWithIgnoreCase(path, "/manifest.webmanifest")) return "no-cache";
+  return "max-age=3600";
 }
 
 Representation selectRepresentation(bool rawExists, bool gzipExists, bool gzipAccepted) {

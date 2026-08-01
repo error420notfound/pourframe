@@ -15,6 +15,10 @@ import type {
 } from './types'
 
 export type ConnectionState = 'connecting' | 'online' | 'offline'
+export type BrowserNetworkState = 'online' | 'offline'
+export type DeviceAvailability = 'connecting' | 'offline' | 'stale' | 'partial' | 'online'
+
+const telemetryWatchdogMs = 3000
 
 interface PendingCommand {
   resolve: (ack: ProtocolAck) => void
@@ -31,6 +35,24 @@ export function usableScale(scale: ScaleTelemetry | undefined | null) {
   if (!scale) return false
   return scale.available && scale.ready && !scale.stale && !scale.disconnected && !scale.calibrating &&
     scale.calibration_valid && !scale.saturated && scale.cadence_valid && Number.isFinite(scale.grams)
+}
+
+export function deriveDeviceAvailability(
+  connection: ConnectionState,
+  telemetry: DeviceTelemetry | null,
+  lastUpdateAt: number,
+  now = Date.now(),
+): DeviceAvailability {
+  if (connection === 'connecting') return 'connecting'
+  if (connection === 'offline') return 'offline'
+  if (!telemetry || !lastUpdateAt || now - lastUpdateAt >= telemetryWatchdogMs) return 'stale'
+
+  const upperUsable = usableScale(telemetry.scales.upper)
+  const lowerUsable = usableScale(telemetry.scales.lower)
+  if (upperUsable !== lowerUsable || telemetry.total.partial) return 'partial'
+  if (!upperUsable || !lowerUsable || !telemetry.total.available || !telemetry.measurement.pair_valid ||
+      telemetry.measurement.pair_status !== 'synchronized') return 'stale'
+  return 'online'
 }
 
 export function validTelemetry(message: unknown): message is DeviceTelemetry {
@@ -321,18 +343,45 @@ export function useDevice() {
   const [connection, setConnection] = useState<ConnectionState>(mockMode ? (mockScenario === 'disconnected' ? 'offline' : 'online') : 'connecting')
   const [lastUpdateAt, setLastUpdateAt] = useState<number>(mockMode ? Date.now() : 0)
   const [lastCalibration, setLastCalibration] = useState<{ channel: ScaleId; ok: boolean } | null>(null)
+  const [browserNetwork, setBrowserNetwork] = useState<BrowserNetworkState>(() =>
+    typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'online')
+  const [reconnectAttempt, setReconnectAttempt] = useState(0)
+  const [reconnectGeneration, setReconnectGeneration] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
   const pendingRef = useRef(new Map<string, PendingCommand>())
   const reconnectAttemptRef = useRef(0)
   const reconnectTimerRef = useRef<number | null>(null)
   const telemetryTimerRef = useRef<number | null>(null)
   const mockTaredRef = useRef<Record<ScaleId, boolean>>({ upper: false, lower: false })
+  const mockDroppedRef = useRef(false)
+  const mockRecoveredRef = useRef(false)
+  const mockDropoutAtRef = useRef<number | null>(null)
+  const commandAuthorityRef = useRef(false)
+
+  useEffect(() => {
+    const updateBrowserNetwork = () => setBrowserNetwork(navigator.onLine === false ? 'offline' : 'online')
+    window.addEventListener('online', updateBrowserNetwork)
+    window.addEventListener('offline', updateBrowserNetwork)
+    return () => {
+      window.removeEventListener('online', updateBrowserNetwork)
+      window.removeEventListener('offline', updateBrowserNetwork)
+    }
+  }, [])
 
   useEffect(() => {
     if (!mockMode || mockScenario === 'disconnected') return
     const startedAt = Date.now()
     const interval = window.setInterval(() => {
       const elapsedMs = Date.now() - startedAt
+      if (mockScenario === 'dropout' && mockDropoutAtRef.current != null && Date.now() >= mockDropoutAtRef.current && !mockRecoveredRef.current) {
+        if (!mockDroppedRef.current) {
+          mockDroppedRef.current = true
+          reconnectAttemptRef.current = 1
+          setReconnectAttempt(1)
+          setConnection('offline')
+        }
+        return
+      }
       setTelemetry((current) => {
         const next = mockTelemetryAt(elapsedMs, current ?? initialTelemetry)
         if (mockScenario === 'partial-upper') {
@@ -358,7 +407,7 @@ export function useDevice() {
       setLastUpdateAt(Date.now())
     }, 100)
     return () => window.clearInterval(interval)
-  }, [])
+  }, [reconnectGeneration])
 
   useEffect(() => {
     if (mockMode) return
@@ -371,7 +420,6 @@ export function useDevice() {
       socketRef.current = socket
 
       socket.addEventListener('open', () => {
-        reconnectAttemptRef.current = 0
         setConnection('connecting')
         if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
         telemetryTimerRef.current = window.setTimeout(() => socket.close(), 3000)
@@ -388,6 +436,8 @@ export function useDevice() {
           setTelemetry(message)
           setLastUpdateAt(Date.now())
           setConnection('online')
+          reconnectAttemptRef.current = 0
+          setReconnectAttempt(0)
           if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
           telemetryTimerRef.current = window.setTimeout(() => socket.close(), 3000)
           return
@@ -415,6 +465,7 @@ export function useDevice() {
         telemetryTimerRef.current = null
         setConnection('offline')
         reconnectAttemptRef.current += 1
+        setReconnectAttempt(reconnectAttemptRef.current)
         const delay = Math.min(1000 * 2 ** (reconnectAttemptRef.current - 1), 10_000)
         reconnectTimerRef.current = window.setTimeout(connect, delay)
       })
@@ -433,15 +484,41 @@ export function useDevice() {
       }
       pendingRef.current.clear()
     }
+  }, [reconnectGeneration])
+
+  const reconnect = useCallback(() => {
+    reconnectAttemptRef.current = 0
+    setReconnectAttempt(0)
+    setConnection('connecting')
+    if (mockMode) {
+      window.setTimeout(() => {
+        if (mockScenario === 'dropout') {
+          mockDroppedRef.current = false
+          mockRecoveredRef.current = true
+          mockDropoutAtRef.current = null
+        }
+        const nextConnection = mockScenario === 'disconnected' ? 'offline' : 'online'
+        setConnection(nextConnection)
+        if (nextConnection === 'offline') {
+          reconnectAttemptRef.current = 1
+          setReconnectAttempt(1)
+        }
+      }, 300)
+      return
+    }
+    setReconnectGeneration((value) => value + 1)
   }, [])
 
   const sendProtocolCommand = useCallback((payload: DeviceCommandPayload) => {
+    if (!commandAuthorityRef.current) return Promise.reject(new Error('Valid live device telemetry is required'))
     if (mockMode) {
       const command = payload.command
       const channel = 'channel' in payload ? payload.channel : undefined
       const grams = 'grams' in payload ? payload.grams : undefined
+      if (mockScenario === 'disconnected') return Promise.reject(new Error('Device is not connected'))
       if (mockScenario === 'command-failure') return Promise.reject(new Error('Mock device rejected the command'))
       if (command === 'tare') {
+        if (mockScenario === 'dropout' && mockDropoutAtRef.current == null) mockDropoutAtRef.current = Date.now() + 10_000
         if (!channel || channel === 'total') return Promise.reject(new Error('Total weight cannot be tared directly'))
         mockTaredRef.current[channel] = true
         setTelemetry((current) => {
@@ -542,6 +619,7 @@ export function useDevice() {
   }, [sendProtocolCommand])
 
   const saveWifi = useCallback(async (ssid: string, password: string) => {
+    if (!commandAuthorityRef.current) throw new Error('Valid live device telemetry is required')
     if (mockMode) {
       await new Promise((resolve) => window.setTimeout(resolve, 500))
       setTelemetry((current) =>
@@ -557,5 +635,24 @@ export function useDevice() {
     if (!response.ok) throw new Error('The device could not save these Wi-Fi credentials')
   }, [])
 
-  return { telemetry, connection, lastUpdateAt, lastCalibration, sendCommand, sendProtocolCommand, saveWifi, mockMode, mockScenario }
+  const availability = deriveDeviceAvailability(connection, telemetry, lastUpdateAt)
+  const liveTelemetry = availability === 'online' || availability === 'partial' ? telemetry : null
+  commandAuthorityRef.current = liveTelemetry !== null
+
+  return {
+    telemetry,
+    liveTelemetry,
+    connection,
+    availability,
+    browserNetwork,
+    reconnectAttempt,
+    reconnect,
+    lastUpdateAt,
+    lastCalibration,
+    sendCommand,
+    sendProtocolCommand,
+    saveWifi,
+    mockMode,
+    mockScenario,
+  }
 }

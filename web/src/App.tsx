@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
-import { BookOpen, ChevronRight, Coffee, History, Maximize2, Moon, Pause, Play, RotateCcw, Save, Scale, Sun, Volume2, VolumeX } from 'lucide-react'
+import { BookOpen, ChevronRight, Coffee, Download, History, Maximize2, Moon, Pause, Play, RefreshCw, RotateCcw, Save, Scale, Sun, Volume2, VolumeX } from 'lucide-react'
 import { ActiveBrewSummary } from './ActiveBrewSummary'
 import { setAudioEnabled } from './audio'
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
@@ -12,9 +12,10 @@ import { CoffeeBagWorkspace } from './CoffeeBagWorkspace'
 import { defaultRecipes } from './defaultRecipes'
 import { loadBrewTrace, useLibrary } from './library'
 import { appHash, parseAppHash, type RecipeLibraryView } from './navigation'
+import { usePwaInstall } from './pwa'
 import type { BrewTraceSample } from './trace'
 import type { DeviceTelemetry, MeasurementTelemetry, ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
-import { usableScale, useDevice, type ConnectionState } from './useDevice'
+import { usableScale, useDevice, type BrowserNetworkState, type ConnectionState, type DeviceAvailability } from './useDevice'
 import { useGuidedBrew } from './useGuidedBrew'
 import { WeightCapture } from './WeightCapture'
 
@@ -25,6 +26,7 @@ interface ScalePanelProps {
   measurement: MeasurementTelemetry | null
   onTare: (id: ScaleId) => Promise<void>
   onCalibrate: (id: ScaleId) => void
+  commandsEnabled: boolean
 }
 
 function TickRail() {
@@ -89,11 +91,12 @@ interface TargetControlProps {
   targetGrams?: number | null
   history?: number[]
   primary?: boolean
+  disabled?: boolean
   onSetTarget: (id: TargetId, grams: number) => Promise<void>
   onClearTarget: (id: TargetId) => Promise<void>
 }
 
-function TargetControl({ id, label, targetGrams, history, primary = false, onSetTarget, onClearTarget }: TargetControlProps) {
+function TargetControl({ id, label, targetGrams, history, primary = false, disabled = false, onSetTarget, onClearTarget }: TargetControlProps) {
   const [actionMessage, setActionMessage] = useState('')
   const [targetInput, setTargetInput] = useState(() => targetGrams?.toFixed(1) ?? '')
   const [targetSaving, setTargetSaving] = useState(false)
@@ -158,6 +161,7 @@ function TargetControl({ id, label, targetGrams, history, primary = false, onSet
         <div className="target-control__input">
           <input
             id={`${id}-target`}
+            disabled={disabled}
             inputMode="decimal"
             min="0.1"
             onChange={(event) => setTargetInput(event.target.value)}
@@ -168,10 +172,10 @@ function TargetControl({ id, label, targetGrams, history, primary = false, onSet
           />
           <span>g</span>
         </div>
-        <button className="target-button target-button--save" disabled={targetSaving} type="submit">
+        <button className="target-button target-button--save" disabled={disabled || targetSaving} type="submit">
           {targetSaving ? 'Saving…' : 'Save'}
         </button>
-        <button className="target-button" disabled={targetSaving || targetGrams == null} onClick={clearTarget} type="button">
+        <button className="target-button" disabled={disabled || targetSaving || targetGrams == null} onClick={clearTarget} type="button">
           Clear
         </button>
       </div>
@@ -181,7 +185,7 @@ function TargetControl({ id, label, targetGrams, history, primary = false, onSet
           {history.map((grams) => (
             <button
               className={targetGrams === grams ? 'target-chip target-chip--active' : 'target-chip'}
-              disabled={targetSaving}
+              disabled={disabled || targetSaving}
               key={grams}
               onClick={() => selectRecentTarget(grams)}
               type="button"
@@ -196,7 +200,7 @@ function TargetControl({ id, label, targetGrams, history, primary = false, onSet
   )
 }
 
-function ScalePanel({ id, label, scale, measurement, onTare, onCalibrate }: ScalePanelProps) {
+function ScalePanel({ id, label, scale, measurement, onTare, onCalibrate, commandsEnabled }: ScalePanelProps) {
   const [actionMessage, setActionMessage] = useState('')
   const unavailable = !scale || scale.disconnected || !scale.calibration_valid
   const weight = unavailable ? '—' : formatWeight(scale.grams)
@@ -226,10 +230,10 @@ function ScalePanel({ id, label, scale, measurement, onTare, onCalibrate }: Scal
           <span>Raw</span> {raw}
         </p>
         <div className="scale-actions">
-          <button className="button button--primary" disabled={unavailable || scale?.calibrating} onClick={tare}>
+          <button className="button button--primary" disabled={!commandsEnabled || unavailable || scale?.calibrating} onClick={tare}>
             Tare
           </button>
-          <button className="button button--secondary" disabled={unavailable || scale?.calibrating} onClick={() => onCalibrate(id)}>
+          <button className="button button--secondary" disabled={!commandsEnabled || unavailable || scale?.calibrating} onClick={() => onCalibrate(id)}>
             {scale?.calibrating ? 'Calibrating…' : 'Calibrate'}
           </button>
         </div>
@@ -247,9 +251,10 @@ interface TotalWeightSectionProps {
   onSetTarget: (id: TargetId, grams: number) => Promise<void>
   onClearTarget: (id: TargetId) => Promise<void>
   dualTare: DualTareControl
+  commandsEnabled: boolean
 }
 
-function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onClearTarget, dualTare }: TotalWeightSectionProps) {
+function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onClearTarget, dualTare, commandsEnabled }: TotalWeightSectionProps) {
   const targetGrams = total?.target_grams
   const liveGrams = total?.grams
   const hasReading = Boolean(total?.available && liveGrams != null)
@@ -332,6 +337,7 @@ function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onC
 
       <div className="total-weight__controls">
         <TargetControl
+          disabled={!commandsEnabled}
           history={total?.target_history_grams}
           id="total"
           label="Total target weight"
@@ -347,6 +353,7 @@ function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onC
         <p>Legacy targets remain available for compatible clients. They do not control the total progress indicator or status LED.</p>
         <div className="advanced-targets__grid">
           <TargetControl
+            disabled={!commandsEnabled}
             history={upper?.target_history_grams}
             id="upper"
             label="Upper target"
@@ -355,6 +362,7 @@ function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onC
             targetGrams={upper?.target_grams}
           />
           <TargetControl
+            disabled={!commandsEnabled}
             history={lower?.target_history_grams}
             id="lower"
             label="Lower target"
@@ -515,6 +523,7 @@ function HealthItem({ label, value, healthy, clock = false }: { label: string; v
 interface DeviceWorkspaceProps {
   telemetry: DeviceTelemetry | null
   connection: ConnectionState
+  availability: DeviceAvailability
   lastUpdateAt: number
   mockMode: boolean
   sendCommand: ReturnType<typeof useDevice>['sendCommand']
@@ -522,7 +531,7 @@ interface DeviceWorkspaceProps {
   dualTare: DualTareControl
 }
 
-function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, saveWifi, mockMode, dualTare }: DeviceWorkspaceProps) {
+function DeviceWorkspace({ telemetry, connection, availability, lastUpdateAt, sendCommand, saveWifi, mockMode, dualTare }: DeviceWorkspaceProps) {
   const [calibrationChannel, setCalibrationChannel] = useState<ScaleId | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -533,7 +542,8 @@ function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, sav
   }, [])
 
   const updateAge = lastUpdateAt ? Math.max(0, now - lastUpdateAt) : 0
-  const online = connection === 'online' && updateAge < 1500
+  const commandsEnabled = availability === 'online' || availability === 'partial'
+  const online = commandsEnabled && updateAge < 1500
   const lastUpdate = useMemo(() => {
     if (!lastUpdateAt) return 'Waiting for data'
     if (updateAge < 1000) return `${Math.max(1, Math.round(updateAge))} ms ago`
@@ -558,11 +568,12 @@ function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, sav
         <div><p className="brew-eyebrow">Device</p><h2>Scale and connectivity</h2></div>
         <div className="header-status">
           <span className="hostname">pourframe.local</span>
-          <span className={online ? 'connection connection--online' : 'connection connection--offline'}><i /> {online ? 'Device online' : connection === 'connecting' ? 'Connecting' : 'Device offline'}</span>
-          <button className="settings-button" onClick={() => setSettingsOpen(true)}><SettingsIcon /> Wi-Fi</button>
+          <span className={online ? 'connection connection--online' : 'connection connection--offline'}><i /> {availability === 'partial' ? 'One scale unavailable' : online ? 'Device online' : connection === 'connecting' ? 'Connecting' : availability === 'stale' ? 'Telemetry degraded' : 'Device offline'}</span>
+          <button className="settings-button" disabled={!commandsEnabled} onClick={() => setSettingsOpen(true)}><SettingsIcon /> Wi-Fi</button>
         </div>
       </div>
       <TotalWeightSection
+        commandsEnabled={commandsEnabled}
         dualTare={dualTare}
         lower={lower}
         measurement={telemetry?.measurement ?? null}
@@ -576,6 +587,7 @@ function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, sav
 
       <div className="scale-grid">
         <ScalePanel
+          commandsEnabled={commandsEnabled}
           id="upper"
           label="Upper / Dripper"
           measurement={telemetry?.measurement ?? null}
@@ -584,6 +596,7 @@ function DeviceWorkspace({ telemetry, connection, lastUpdateAt, sendCommand, sav
           scale={upper}
         />
         <ScalePanel
+          commandsEnabled={commandsEnabled}
           id="lower"
           label="Lower / Carafe"
           measurement={telemetry?.measurement ?? null}
@@ -699,6 +712,9 @@ interface BrewWorkspaceProps {
   sound: boolean
   traceBuffer: NonNullable<ReturnType<typeof useGuidedBrew>['traceBuffer']>
   dualTare: DualTareControl
+  canStartDevice: boolean
+  canResumeDevice: boolean
+  deviceBlocked: boolean
   onStart: () => void
   onPause: () => void
   onReset: () => void
@@ -708,7 +724,7 @@ interface BrewWorkspaceProps {
   onToggleSound: () => void
 }
 
-function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, status, elapsed, mode, telemetry, machine, relative, cue, message, sound, traceBuffer, dualTare, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly, onToggleSound }: BrewWorkspaceProps) {
+function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, status, elapsed, mode, telemetry, machine, relative, cue, message, sound, traceBuffer, dualTare, canStartDevice, canResumeDevice, deviceBlocked, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly, onToggleSound }: BrewWorkspaceProps) {
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [summaryFullscreenActive, setSummaryFullscreenActive] = useState(false)
   const summaryTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -743,11 +759,11 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
       <div className="brew-timer"><span>{status === 'paused' ? 'Paused' : active ? step.name : status === 'complete' ? 'Complete' : 'Ready'}</span><strong>{formatTime(elapsed)}</strong><small>{formatTime(recipe.brewTime)} total</small></div>
       <dl className="brew-key-metrics"><div><dt>Coffee dose</dt><dd>{formatRecipeWeight(recipe.coffee)} g</dd></div><div><dt>Expected yield</dt><dd>{formatRecipeWeight(expectedRecipeYield(recipe))} g</dd><small>Coffee × ratio</small></div><div><dt>Brew time</dt><dd>{formatTime(recipe.brewTime)}</dd></div></dl>
       <div className="brew-actions">
-        {!active ? <button className="brew-primary" onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Prepare brew'}</button> : <button className="brew-primary" onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{status === 'paused' ? 'Resume' : 'Pause'}</button>}
+        {!active ? <button className="brew-primary" disabled={!canStartDevice} onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Prepare brew'}</button> : <button className="brew-primary" disabled={deviceBlocked && !canResumeDevice} onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{deviceBlocked && !canResumeDevice ? 'Waiting for device' : status === 'paused' ? 'Resume' : 'Pause'}</button>}
         <button className="brew-secondary" disabled={elapsed === 0 && status === 'idle'} onClick={onReset}><RotateCcw aria-hidden="true" />Reset</button>
         {active ? <button className="brew-secondary" onClick={openSummary} ref={summaryTriggerRef}><Maximize2 aria-hidden="true" />Full screen</button> : null}
-        {active ? <button className="brew-secondary" onClick={onManualAdvance}>Advance step</button> : null}
-        {machine.phase === 'WAITING_FOR_STABLE_BASELINE' && mode === 'device' ? <button className="brew-secondary" onClick={onTimerOnly}>Continue timer only</button> : null}
+        {active ? <button className="brew-secondary" disabled={deviceBlocked} onClick={onManualAdvance}>Advance step</button> : null}
+        {(machine.phase === 'WAITING_FOR_STABLE_BASELINE' || deviceBlocked) && mode === 'device' ? <button className="brew-secondary" onClick={onTimerOnly}>Continue timer only</button> : null}
         {active ? <button className="brew-secondary" onClick={onFinish}>Finish</button> : null}
       </div>
       <div className="brew-progress" role="progressbar" aria-label="Brew progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><span style={{ width: `${progress * 100}%` }} /></div>
@@ -830,9 +846,43 @@ function HistoryWorkspace({ brews, onClear }: { brews: BrewRecord[]; onClear: ()
   return <section className="history-workspace"><div className="section-heading"><div><p className="brew-eyebrow">Shared on PourFrame · latest five</p><h2>Brew history</h2></div><button className="brew-secondary" disabled={!brews.length} onClick={() => window.confirm('Clear all shared brew history?') && void onClear()}>Clear history</button></div>{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <div className="empty-history"><History aria-hidden="true" /><h3>No completed brews yet</h3><p>Your next completed brew will be saved here for everyone using this PourFrame.</p></div>}</section>
 }
 
+function DeviceStatusBanner({ availability, browserNetwork, reconnectAttempt, onReconnect }: {
+  availability: DeviceAvailability
+  browserNetwork: BrowserNetworkState
+  reconnectAttempt: number
+  onReconnect: () => void
+}) {
+  if (availability === 'online' && browserNetwork === 'online') return null
+  const title = availability === 'offline'
+    ? 'PourFrame device offline'
+    : availability === 'connecting'
+      ? reconnectAttempt > 0 ? 'Reconnecting to PourFrame' : 'Connecting to PourFrame'
+      : availability === 'stale'
+        ? 'PourFrame telemetry unavailable'
+        : availability === 'partial'
+          ? 'One PourFrame scale is unavailable'
+          : 'Browser offline'
+  const description = availability === 'offline'
+    ? 'Live weighing and device-controlled brewing require PourFrame. Cached recipes, coffee bags, and completed brews remain available.'
+    : availability === 'connecting'
+      ? `${reconnectAttempt ? `Reconnect attempt ${reconnectAttempt}. ` : ''}Live controls will return only after valid telemetry is received.`
+      : availability === 'stale'
+        ? 'The device connection is present, but current synchronized measurements are not available. Live readings and commands are paused.'
+        : availability === 'partial'
+          ? 'The connected device is reporting only one usable scale. Scale-controlled brewing requires both synchronized scales.'
+          : 'Internet access appears unavailable. Local PourFrame device status is still determined by live telemetry.'
+  const reconnectable = availability === 'offline' || availability === 'stale'
+
+  return <div className={`device-status-banner device-status-banner--${availability}`} role="status">
+    <div><strong>{title}</strong><span>{description}</span>{browserNetwork === 'offline' && availability !== 'online' ? <small>Browser network status: offline</small> : null}</div>
+    {reconnectable ? <button className="device-status-banner__action" onClick={onReconnect} type="button"><RefreshCw aria-hidden="true" />Reconnect</button> : null}
+  </div>
+}
+
 function App() {
   const device = useDevice()
   const library = useLibrary()
+  const pwaInstall = usePwaInstall()
   const [navigation, setNavigation] = useState(() => {
     const savedRecipeView: RecipeLibraryView = storedValue('pourframe.recipes.view.v1') === 'recipes' ? 'recipes' : 'coffee'
     return parseAppHash(window.location.hash, savedRecipeView)
@@ -847,7 +897,7 @@ function App() {
   const [sound, setSound] = useState(() => storedValue('pourframe.sound') !== 'off')
   const [dark, setDark] = useState(() => storedValue('pourframe.theme') === 'dark')
   const coffeeBag = library.coffeeBags.find((bag) => bag.id === coffeeBagId) ?? null
-  const guided = useGuidedBrew(recipe, coffeeBag, device.telemetry, device.connection, device.sendCommand, device.sendProtocolCommand, library.saveBrew)
+  const guided = useGuidedBrew(recipe, coffeeBag, device.liveTelemetry, device.connection, device.sendCommand, device.sendProtocolCommand, library.saveBrew)
   const toggleSound = useCallback(() => {
     const enabled = !sound
     setAudioEnabled(enabled)
@@ -889,22 +939,25 @@ function App() {
   }, [coffeeBagId])
 
   const selectRecipe = (next: BrewRecipe) => { setRecipe(migrateRecipe(next)); guided.reset() }
-  const online = device.connection === 'online' && Boolean(device.telemetry)
-  const tareBothAvailable = online && usableScale(device.telemetry?.scales.upper) && usableScale(device.telemetry?.scales.lower) &&
+  const online = device.availability === 'online'
+  const commandsEnabled = device.availability === 'online' || device.availability === 'partial'
+  const canStartDevice = online && completePairedTelemetry(device.liveTelemetry)
+  const tareBothAvailable = commandsEnabled && usableScale(device.liveTelemetry?.scales.upper) && usableScale(device.liveTelemetry?.scales.lower) &&
     (guided.status === 'idle' || guided.status === 'complete') && guided.prepStage == null
   const dualTare = useDualTare(device.sendCommand, tareBothAvailable)
 
   return <main className="appliance" data-theme={dark ? 'dark' : 'light'}>
-    <header className="appliance-header"><a className="brand" href="#brew"><span>PF</span><div><strong>PourFrame</strong><small>Local brewing appliance</small></div></a><nav aria-label="Primary navigation">{([['brew', 'Brew', Coffee], ['recipes', 'Recipes', BookOpen], ['history', 'History', History], ['device', 'Device', Scale]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id, recipeLibraryView)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><div className="appliance-actions"><span className={online ? 'appliance-connection online' : 'appliance-connection'}><i />{online ? 'Scale live' : device.connection === 'connecting' ? 'Finding scale' : 'Scale offline'}</span><button aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'} onClick={toggleSound}>{sound ? <Volume2 /> : <VolumeX />}</button><button aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={() => setDark((value) => !value)}>{dark ? <Sun /> : <Moon />}</button></div></header>
+    <header className="appliance-header"><a className="brand" href="#brew"><span>PF</span><div><strong>PourFrame</strong><small>Local brewing appliance</small></div></a><nav aria-label="Primary navigation">{([['brew', 'Brew', Coffee], ['recipes', 'Recipes', BookOpen], ['history', 'History', History], ['device', 'Device', Scale]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id, recipeLibraryView)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><div className="appliance-actions"><span className={online ? 'appliance-connection online' : 'appliance-connection'}><i />{device.availability === 'partial' ? 'One scale live' : online ? 'Scale live' : device.availability === 'stale' ? 'Telemetry stale' : device.connection === 'connecting' ? 'Finding scale' : 'Scale offline'}</span>{pwaInstall.canInstall ? <button className="install-app" onClick={() => void pwaInstall.install()} type="button"><Download aria-hidden="true" /><span>Install app</span></button> : null}<button aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'} onClick={toggleSound}>{sound ? <Volume2 /> : <VolumeX />}</button><button aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={() => setDark((value) => !value)}>{dark ? <Sun /> : <Moon />}</button></div></header>
+    <DeviceStatusBanner availability={device.availability} browserNetwork={device.browserNetwork} reconnectAttempt={device.reconnectAttempt} onReconnect={device.reconnect} />
     {library.hasLegacy ? <div className="legacy-banner"><span>Browser-saved PourOver recipes were found.</span><button onClick={() => void library.importLegacy()}>Import to PourFrame</button></div> : null}
     {library.status !== 'ready' ? <div className={`library-status library-status--${library.status}`} role="status">{library.message}</div> : null}
     <div className="appliance-body">
-      {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.telemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} sound={sound} traceBuffer={guided.traceBuffer!} dualTare={dualTare} onStart={() => guided.setPrepStage('confirm')} onPause={guided.pauseResume} onReset={guided.reset} onFinish={guided.finish} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} onToggleSound={toggleSound} /> : null}
+      {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.liveTelemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} sound={sound} traceBuffer={guided.traceBuffer!} dualTare={dualTare} canStartDevice={canStartDevice} canResumeDevice={canStartDevice} deviceBlocked={guided.deviceBlocked} onStart={() => guided.setPrepStage('confirm')} onPause={guided.pauseResume} onReset={guided.reset} onFinish={guided.finish} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} onToggleSound={toggleSound} /> : null}
       {tab === 'recipes' ? <div className="recipes-area"><div className="recipe-section-tabs" role="tablist" aria-label="Recipe library sections"><a aria-selected={recipeLibraryView === 'coffee'} className={recipeLibraryView === 'coffee' ? 'active' : ''} href={appHash('recipes', 'coffee')} role="tab">Coffee bags</a><a aria-selected={recipeLibraryView === 'recipes'} className={recipeLibraryView === 'recipes' ? 'active' : ''} href={appHash('recipes', 'recipes')} role="tab">Brew recipes</a></div>{recipeLibraryView === 'coffee' ? <CoffeeBagWorkspace bags={library.coffeeBags} onSave={library.saveCoffeeBag} onDelete={library.deleteCoffeeBag} /> : <RecipeWorkspace recipes={library.recipes} active={recipe} onSelect={selectRecipe} onSave={async (value) => { await library.saveRecipe(value); selectRecipe(value) }} onDelete={async (id) => { await library.deleteRecipe(id); if (recipe.id === id) selectRecipe(library.recipes.find((item) => item.id !== id) ?? defaultRecipes[0]) }} />}</div> : null}
       {tab === 'history' ? <HistoryWorkspace brews={library.brews} onClear={library.clearBrews} /> : null}
-      {tab === 'device' ? <DeviceWorkspace telemetry={device.telemetry} connection={device.connection} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} dualTare={dualTare} /> : null}
+      {tab === 'device' ? <DeviceWorkspace telemetry={device.liveTelemetry} connection={device.connection} availability={device.availability} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} dualTare={dualTare} /> : null}
     </div>
-    {guided.prepStage ? <PreparationModal stage={guided.prepStage} message={guided.message} recipe={recipe} coffeeBag={coffeeBag} usableUpper={usableScale(device.telemetry?.scales.upper)} usableLower={usableScale(device.telemetry?.scales.lower)} onClose={() => guided.setPrepStage(null)} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} /> : null}
+    {guided.prepStage ? <PreparationModal stage={guided.prepStage} message={guided.message} recipe={recipe} coffeeBag={coffeeBag} usableUpper={usableScale(device.liveTelemetry?.scales.upper)} usableLower={usableScale(device.liveTelemetry?.scales.lower)} onClose={() => guided.setPrepStage(null)} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} /> : null}
   </main>
 }
 
