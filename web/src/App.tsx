@@ -710,6 +710,7 @@ interface BrewWorkspaceProps {
 
 function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, status, elapsed, mode, telemetry, machine, relative, cue, message, sound, traceBuffer, dualTare, onStart, onPause, onReset, onFinish, onManualAdvance, onTimerOnly, onToggleSound }: BrewWorkspaceProps) {
   const [summaryOpen, setSummaryOpen] = useState(false)
+  const [summaryFullscreenActive, setSummaryFullscreenActive] = useState(false)
   const summaryTriggerRef = useRef<HTMLButtonElement | null>(null)
   const schedule = useMemo(() => buildSchedule(recipe), [recipe])
   const index = machine.phase === 'DRAWDOWN' || machine.phase === 'COMPLETE' ? schedule.length - 1 : Math.max(0, machine.currentStepIndex)
@@ -721,12 +722,19 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
   const selectedBag = coffeeBags.find((bag) => bag.id === coffeeBagId) ?? null
   const openSummary = useCallback(() => {
     setSummaryOpen(true)
-    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-      void document.documentElement.requestFullscreen().catch(() => undefined)
+    if (document.fullscreenElement) {
+      setSummaryFullscreenActive(true)
+      return
     }
+    setSummaryFullscreenActive(false)
+    if (!document.fullscreenEnabled || !document.documentElement.requestFullscreen) return
+    void document.documentElement.requestFullscreen()
+      .then(() => setSummaryFullscreenActive(document.fullscreenElement === document.documentElement))
+      .catch(() => setSummaryFullscreenActive(false))
   }, [])
   const closeSummary = useCallback(() => {
     setSummaryOpen(false)
+    setSummaryFullscreenActive(false)
     requestAnimationFrame(() => summaryTriggerRef.current?.focus())
   }, [])
   return <div className="brew-layout">
@@ -750,6 +758,7 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
     <section className="brew-guide" aria-live="polite"><div className="brew-guide__current"><span>Current step · target {formatRecipeWeight(step.cumulative)} g</span><h3>{step.name}</h3><p>{step.instruction}</p>{next ? <div className="next-step"><span>Next</span><strong>{next.name} at {formatTime(next.start)}</strong><ChevronRight aria-hidden="true" /></div> : null}</div><ol className="brew-timeline">{schedule.map((item, itemIndex) => <li className={itemIndex < index ? 'done' : itemIndex === index ? 'active' : ''} key={item.id}><span>{itemIndex < index ? '✓' : itemIndex + 1}</span><div><strong>{item.name}</strong><small>{formatRecipeWeight(item.cumulative)} g · {formatTime(item.start)}</small></div></li>)}</ol></section>
     {summaryOpen ? <ActiveBrewSummary
       elapsed={elapsed}
+      fullscreenActive={summaryFullscreenActive}
       machine={machine}
       message={message}
       mode={mode}

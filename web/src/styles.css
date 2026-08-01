@@ -37,6 +37,7 @@
   --chart-total: #512612;
   --chart-upper: #336b8e;
   --chart-lower: #247a36;
+  --brew-focus-bg: #080a08;
 }
 
 * { box-sizing: border-box; }
@@ -48,6 +49,11 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background: var(--background);
+}
+
+html.focus-view-active,
+body.focus-view-active {
+  background: var(--brew-focus-bg);
 }
 
 button, input { font: inherit; }
@@ -932,7 +938,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brew-progress span { display: block; height: 100%; border-radius: inherit; background: var(--app-accent); transition: width 300ms linear; }
 
 .active-brew-summary {
-  --focus-bg: #080a08;
+  --focus-bg: var(--brew-focus-bg);
   --focus-fill: #173a24;
   --focus-surface: rgba(246, 247, 244, 0.08);
   --focus-surface-strong: rgba(246, 247, 244, 0.14);
@@ -942,9 +948,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   position: fixed;
   z-index: 1000;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
   overflow: hidden;
   background: var(--focus-bg);
   color: var(--focus-text);
@@ -954,7 +957,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   position: absolute;
   z-index: -1;
   inset: 0;
-  border-radius: 0 clamp(30px, 5vw, 76px) clamp(30px, 5vw, 76px) 0;
+  border-radius: 0;
   background: var(--focus-fill);
   transform-origin: left center;
   transition: transform 180ms linear;

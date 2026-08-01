@@ -12,6 +12,7 @@ export interface ActiveBrewSummaryProps {
   schedule: BrewStep[]
   status: BrewStatus
   elapsed: number
+  fullscreenActive: boolean
   mode: BrewMode
   telemetry: DeviceTelemetry | null
   machine: BrewMachineState
@@ -35,6 +36,7 @@ export function ActiveBrewSummary({
   schedule,
   status,
   elapsed,
+  fullscreenActive,
   mode,
   telemetry,
   machine,
@@ -67,10 +69,14 @@ export function ActiveBrewSummary({
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
+    const documentElementHadFocusClass = document.documentElement.classList.contains('focus-view-active')
+    const bodyHadFocusClass = document.body.classList.contains('focus-view-active')
     const appliance = document.querySelector<HTMLElement>('.appliance')
     const applianceWasInert = appliance?.hasAttribute('inert') ?? false
     const previousAriaHidden = appliance?.getAttribute('aria-hidden')
     document.body.style.overflow = 'hidden'
+    document.documentElement.classList.add('focus-view-active')
+    document.body.classList.add('focus-view-active')
     appliance?.setAttribute('inert', '')
     appliance?.setAttribute('aria-hidden', 'true')
     primaryActionRef.current?.focus()
@@ -111,6 +117,8 @@ export function ActiveBrewSummary({
     window.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
+      if (!documentElementHadFocusClass) document.documentElement.classList.remove('focus-view-active')
+      if (!bodyHadFocusClass) document.body.classList.remove('focus-view-active')
       if (appliance) {
         if (!applianceWasInert) appliance.removeAttribute('inert')
         if (previousAriaHidden == null) appliance.removeAttribute('aria-hidden')
@@ -161,6 +169,7 @@ export function ActiveBrewSummary({
       aria-labelledby="active-brew-summary-title"
       aria-modal="true"
       className="active-brew-summary"
+      data-display-mode={fullscreenActive ? 'fullscreen' : 'focus'}
       ref={overlayRef}
       role="dialog"
     >
@@ -191,7 +200,7 @@ export function ActiveBrewSummary({
             >
               {sound ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
             </button>
-            <button aria-label="Exit full-screen brew summary" className="active-brew-summary__utility" onClick={exit} ref={exitButtonRef} type="button">
+            <button aria-label={fullscreenActive ? 'Exit full-screen brew summary' : 'Exit brew focus view'} className="active-brew-summary__utility" onClick={exit} ref={exitButtonRef} type="button">
               <Minimize2 aria-hidden="true" />
             </button>
           </div>
