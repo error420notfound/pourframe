@@ -53,8 +53,12 @@ export function reduceBrewMachine(state: BrewMachineState, event: BrewMachineEve
   return state
 }
 
+export function liveScaleTelemetry(telemetry: DeviceTelemetry | null | undefined) {
+  return Boolean(telemetry && usableScale(telemetry.scales.upper) && usableScale(telemetry.scales.lower) && telemetry.total.available && Number.isFinite(telemetry.total.grams))
+}
+
 export function completePairedTelemetry(telemetry: DeviceTelemetry | null | undefined) {
-  return Boolean(telemetry && usableScale(telemetry.scales.upper) && usableScale(telemetry.scales.lower) && telemetry.total.available && !telemetry.total.partial && telemetry.measurement.pair_valid && telemetry.measurement.pair_status === 'synchronized' && Number.isFinite(telemetry.total.grams))
+  return liveScaleTelemetry(telemetry) && Boolean(telemetry?.total.partial === false && telemetry.measurement.pair_valid && telemetry.measurement.pair_status === 'synchronized')
 }
 
 export function stablePairedTelemetry(telemetry: DeviceTelemetry | null | undefined) {

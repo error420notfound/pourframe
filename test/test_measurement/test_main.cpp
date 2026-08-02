@@ -149,14 +149,15 @@ void testTargetedResetAndLongGap() {
 }
 
 void testPublicationLimiterAndNoAveraging() {
-  measurement::PublicationLimiter limiter(100);
+  measurement::PublicationLimiter limiter(measurement::config::kPublicationIntervalMs);
   std::vector<uint32_t> publications;
   for (uint32_t now = 0; now <= 1000; ++now) {
     if (limiter.due(now)) publications.push_back(now);
   }
-  expect(publications.size() == 10, "100 ms limiter publishes ten times per second");
+  expect(publications.size() == 2, "500 ms limiter publishes twice per second");
   for (size_t index = 1; index < publications.size(); ++index) {
-    expect(publications[index] - publications[index - 1] == 100, "publication spacing remains 100 ms");
+    expect(publications[index] - publications[index - 1] == measurement::config::kPublicationIntervalMs,
+           "publication spacing remains 500 ms");
   }
 
   MeasurementPipeline fullRate;
@@ -164,7 +165,8 @@ void testPublicationLimiterAndNoAveraging() {
   fullRate.setCalibration(calibration());
   publishedRate.setCalibration(calibration());
   double latestPublished = 0.0;
-  measurement::PublicationLimiter selectionLimiter(100);
+  measurement::PublicationLimiter selectionLimiter(measurement::config::kPublicationIntervalMs);
+  selectionLimiter.due(0);
   for (uint32_t index = 1; index <= 20; ++index) {
     const auto sample = pair(index, static_cast<double>(index), 20.0);
     fullRate.process(sample, 10.0);

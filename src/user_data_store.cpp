@@ -344,7 +344,8 @@ bool UserDataStore::validBrew(JsonObjectConst brew, String &error) const {
     if (!brew["trace"].isNull()) {
       if (!brew["trace"].is<JsonObjectConst>()) { error = "invalid_trace_metadata"; return false; }
       JsonObjectConst trace = brew["trace"].as<JsonObjectConst>();
-      if (trace["schema"].as<int>() != 1 || trace["sample_hz"].as<int>() != 10 ||
+      const int sampleHz = trace["sample_hz"].as<int>();
+      if (trace["schema"].as<int>() != 1 || (sampleHz != 2 && sampleHz != 10) ||
           !integerInRange(trace["sample_count"], 0, 4200) ||
           !integerInRange(trace["byte_length"], 16, 138616) || !boundedString(trace["crc32"], 8, 8) ||
           !trace["available"].is<bool>() || !trace["available"].as<bool>()) {

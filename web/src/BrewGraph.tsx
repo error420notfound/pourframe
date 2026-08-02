@@ -3,8 +3,10 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { BrewRecipe, BrewStep, StepTransition } from './brewTypes'
 import type { BrewTraceBuffer, BrewTraceBufferEvent, BrewTraceSample } from './trace'
+import { cssColor, withAlpha } from './chartTheme'
 
 type GraphColumns = [number[], Array<number | null>, Array<number | null>, Array<number | null>]
+const smoothPath = uPlot.paths.spline?.({ alignGaps: 0 })
 
 export interface BrewMilestone {
   id: string
@@ -39,6 +41,9 @@ export function brewMilestones(recipe: BrewRecipe, schedule: BrewStep[], transit
 function emptyColumns(): GraphColumns { return [[], [], [], []] }
 const placeholderColumns: GraphColumns = [[0, 1], [0, 0], [null, null], [null, null]]
 function plottableColumns(columns: GraphColumns) { return columns[0].length ? columns : placeholderColumns }
+export function hasPlottableValues(columns: GraphColumns) {
+  return columns.slice(1).some((series) => series.some((value) => value != null && Number.isFinite(value)))
+}
 
 function appendColumn(columns: GraphColumns, sample: BrewTraceSample) {
   columns[0].push(sample.elapsedMs / 1000)
@@ -51,10 +56,6 @@ export function traceColumns(samples: BrewTraceSample[]) {
   const columns = emptyColumns()
   samples.forEach((sample) => appendColumn(columns, sample))
   return columns
-}
-
-function cssColor(name: string, fallback: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
 }
 
 function milestonePlugin(getMilestones: () => BrewMilestone[]): uPlot.Plugin {
@@ -97,6 +98,9 @@ function milestonePlugin(getMilestones: () => BrewMilestone[]): uPlot.Plugin {
 
 function graphOptions(width: number, height: number, getMilestones: () => BrewMilestone[]): uPlot.Options {
   const value = (_plot: uPlot, raw: number | null) => raw == null ? '—' : `${raw.toFixed(1)} g`
+  const total = cssColor('--chart-total', '#512612')
+  const upper = cssColor('--chart-upper', '#336b8e')
+  const lower = cssColor('--chart-lower', '#247a36')
   const axis = cssColor('--app-muted', '#76706b')
   const grid = cssColor('--app-line', '#dedbd8')
   return {
@@ -106,9 +110,9 @@ function graphOptions(width: number, height: number, getMilestones: () => BrewMi
     legend: { show: true, live: true },
     series: [
       { label: 'Time', value: (_plot, raw) => raw == null ? '—' : `${raw.toFixed(1)} s` },
-      { label: 'Combined', stroke: cssColor('--chart-total', '#512612'), width: 2.5, spanGaps: false, points: { show: false }, value },
-      { label: 'Upper', stroke: cssColor('--chart-upper', '#336b8e'), width: 1.5, dash: [9, 5], spanGaps: false, points: { show: false }, value },
-      { label: 'Lower', stroke: cssColor('--chart-lower', '#247a36'), width: 1.5, dash: [2, 5], spanGaps: false, points: { show: false }, value },
+      { label: 'Combined', paths: smoothPath, stroke: withAlpha(total, 0.92), fill: withAlpha(total, 0.12), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 2.3, spanGaps: false, points: { show: false }, value },
+      { label: 'Upper', paths: smoothPath, stroke: withAlpha(upper, 0.88), fill: withAlpha(upper, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 1.8, spanGaps: false, points: { show: false }, value },
+      { label: 'Lower', paths: smoothPath, stroke: withAlpha(lower, 0.88), fill: withAlpha(lower, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 1.8, spanGaps: false, points: { show: false }, value },
     ],
     axes: [
       { label: 'Brew time (s)', stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid, width: 1 }, values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(tick < 10 ? 1 : 0)) },
@@ -133,7 +137,7 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
   const milestonesRef = useRef(milestones)
   const frameRef = useRef<number | null>(null)
   const resizeFrameRef = useRef<number | null>(null)
-  const [empty, setEmpty] = useState(columnsRef.current[0].length === 0)
+  const [empty, setEmpty] = useState(!hasPlottableValues(columnsRef.current))
   milestonesRef.current = milestones
 
   const updatePlot = useCallback(() => {
@@ -148,7 +152,10 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
     const host = hostRef.current
     if (!host) return
     const height = compact ? 230 : 300
-    plotRef.current = new uPlot(graphOptions(Math.max(280, Math.floor(host.getBoundingClientRect().width)), height, () => milestonesRef.current), plottableColumns(columnsRef.current), host)
+    // Start with a valid two-point shape, then hydrate it from the source or
+    // saved samples in the data effects below. This avoids relying on the
+    // first render's columns when a history trace arrives asynchronously.
+    plotRef.current = new uPlot(graphOptions(Math.max(280, Math.floor(host.getBoundingClientRect().width)), height, () => milestonesRef.current), placeholderColumns, host)
     const observer = new ResizeObserver(() => {
       if (resizeFrameRef.current != null) return
       resizeFrameRef.current = requestAnimationFrame(() => {
@@ -167,16 +174,23 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
   }, [compact])
 
   useEffect(() => {
+    if (!samples) return
+    columnsRef.current = traceColumns(samples)
+    setEmpty(!hasPlottableValues(columnsRef.current))
+    updatePlot()
+  }, [samples, updatePlot])
+
+  useEffect(() => {
     if (!source) return
     columnsRef.current = traceColumns(source.samples())
-    setEmpty(columnsRef.current[0].length === 0)
+    setEmpty(!hasPlottableValues(columnsRef.current))
     updatePlot()
     return source.subscribe((event: BrewTraceBufferEvent) => {
       if (event.type === 'clear') {
         columnsRef.current = emptyColumns(); setEmpty(true)
       } else {
         appendColumn(columnsRef.current, event.sample)
-        if (columnsRef.current[0].length === 1) setEmpty(false)
+        setEmpty(!hasPlottableValues(columnsRef.current))
       }
       updatePlot()
     })

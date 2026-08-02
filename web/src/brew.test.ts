@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { deriveActiveBrewSummary } from './brewSummaryModel'
 import { buildSchedule, expectedRecipeYield, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
 import { createCoffeeBag, filterCoffeeBags, normalizeCoffeeBag, snapshotCoffeeBag, sortCoffeeBags, validateCoffeeBag } from './coffeeBag'
-import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
+import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
 import { tareBothScales } from './brewSession'
-import { brewMilestones, traceColumns } from './BrewGraph'
+import { brewMilestones, hasPlottableValues, traceColumns } from './BrewGraph'
 import { defaultRecipes } from './defaultRecipes'
 import { LibraryApiError, loadBrewTrace, parseLegacyBrews, parseLegacyRecipes, retainNewestBrews, retryOnConflict } from './library'
 import { BrewTraceBuffer, decodeTrace, encodeTrace, traceSample } from './trace'
@@ -204,6 +204,14 @@ describe('device preparation and virtual baselines', () => {
     expect(relativeReadings(next, captured?.baseline)).toEqual({ relativeUpper: 5, relativeLower: 10, stepWaterAdded: 15 })
   })
 
+  it('separates live scale availability from pair synchronization quality', () => {
+    const transient = telemetry()
+    transient.measurement = { ...transient.measurement, pair_valid: false, pair_status: 'retained_peer' }
+    transient.total = { ...transient.total, partial: true }
+    expect(liveScaleTelemetry(transient)).toBe(true)
+    expect(completePairedTelemetry(transient)).toBe(false)
+  })
+
   it('does not apply duplicate transitions twice', () => {
     const step = buildSchedule(defaultRecipes[0])[0]
     const captured = captureBaseline(telemetry(), step, 0, 0, 'brew:bloom', 'automatic')!
@@ -256,7 +264,7 @@ describe('device preparation and virtual baselines', () => {
   })
 })
 
-describe('10 Hz trace format', () => {
+describe('2 Hz published trace format', () => {
   it('round-trips absolute, relative, health, and rate fields', () => {
     const sample = telemetry()
     const baseline = captureBaseline(sample, buildSchedule(defaultRecipes[0])[0], 0, 0, 'id', 'automatic')!.baseline
@@ -267,18 +275,28 @@ describe('10 Hz trace format', () => {
     expect(decoded.stepWaterAdded).toBe(7)
     expect(decoded.pourRate).toBe(4.5)
     expect(decoded.confidence).toBeCloseTo(sample.measurement.confidence, 2)
-    expect(encoded.metadata.sample_hz).toBe(10)
+    expect(encoded.metadata.sample_hz).toBe(2)
   })
 
-  it('bounds a seven-minute 10 Hz trace to 138616 bytes', () => {
+  it('bounds a seven-minute 2 Hz trace to 27736 bytes', () => {
     const item = traceSample(telemetry(), undefined, 0, 0)
-    expect(encodeTrace(Array.from({ length: 4200 }, (_, index) => ({ ...item, elapsedMs: index * 100 }))).bytes.byteLength).toBe(138616)
+    expect(encodeTrace(Array.from({ length: 840 }, (_, index) => ({ ...item, elapsedMs: index * 500 }))).bytes.byteLength).toBe(27736)
   })
 
   it('rejects corruption', () => {
     const encoded = encodeTrace([traceSample(telemetry(), undefined, 0, 0)])
     encoded.bytes[20] ^= 1
     expect(() => decodeTrace(encoded.bytes)).toThrow('checksum')
+  })
+
+  it('round trips large saved weights without scaling them down', () => {
+    const samples = [
+      { ...traceSample(telemetry(), undefined, 0, 0), upper: 18.4, lower: 246.8, total: 265.2 },
+      { ...traceSample(telemetry(), undefined, 100, 0), upper: 16.2, lower: 254.7, total: 270.9 },
+      { ...traceSample(telemetry(), undefined, 200, 0), upper: 450.5, lower: 32.1, total: 482.6 },
+    ]
+    const decoded = decodeTrace(encodeTrace(samples).bytes)
+    expect(decoded.map((sample) => sample.total)).toEqual([265.2, 270.9, 482.6])
   })
 
   it('publishes append and clear events without copying the trace array', () => {
@@ -295,6 +313,12 @@ describe('10 Hz trace format', () => {
   it('maps saved trace samples into uPlot columns', () => {
     const sample = traceSample(telemetry(), undefined, 250, 0)
     expect(traceColumns([sample])).toEqual([[0.25], [20], [10], [10]])
+  })
+
+  it('distinguishes drawable weight values from timestamp-only trace frames', () => {
+    const sample = traceSample(telemetry(), undefined, 250, 0)
+    expect(hasPlottableValues(traceColumns([sample]))).toBe(true)
+    expect(hasPlottableValues(traceColumns([{ ...sample, upper: Number.NaN, lower: Number.NaN, total: Number.NaN }]))).toBe(false)
   })
 })
 

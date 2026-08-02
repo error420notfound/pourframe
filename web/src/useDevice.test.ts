@@ -100,9 +100,15 @@ describe('deriveDeviceAvailability', () => {
     expect(deriveDeviceAvailability('online', value, now - 100, now)).toBe('partial')
   })
 
-  it('reports connected invalid paired telemetry as degraded', () => {
+  it('keeps fresh scales online when one frame is not synchronized', () => {
     const value = telemetry()
-    value.measurement = { ...value.measurement, pair_valid: false, pair_status: 'unavailable' }
-    expect(deriveDeviceAvailability('online', value, now - 100, now)).toBe('stale')
+    value.measurement = { ...value.measurement, pair_valid: false, pair_status: 'retained_peer' }
+    expect(deriveDeviceAvailability('online', value, now - 100, now)).toBe('online')
+  })
+
+  it('does not turn two fresh scales offline because the aggregate is marked partial', () => {
+    const value = telemetry()
+    value.total = { ...value.total, partial: true }
+    expect(deriveDeviceAvailability('online', value, now - 100, now)).toBe('online')
   })
 })

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Minimize2, Pause, Play, Square, Volume2, VolumeX } from 'lucide-react'
 import { deriveActiveBrewSummary } from './brewSummaryModel'
 import { formatRecipeWeight, formatTime } from './brew'
-import type { BrewMachineState } from './brewMachine'
+import { liveScaleTelemetry, type BrewMachineState } from './brewMachine'
 import type { BrewMode, BrewRecipe, BrewStatus, BrewStep } from './brewTypes'
 import type { DeviceTelemetry } from './types'
 
@@ -158,7 +158,9 @@ export function ActiveBrewSummary({
   const remainingCopy = summary.remainingWater == null
     ? summary.weightState === 'timer_only'
       ? 'Timer-only brew · weight unavailable'
-      : 'Scale data unavailable or unsynchronized'
+      : liveScaleTelemetry(telemetry)
+        ? 'Waiting for synchronized scale data'
+        : 'Scale connection unavailable'
     : summary.remainingWater > 0
       ? `${formatWeight(summary.remainingWater)} g remaining`
       : `${formatWeight(Math.abs(summary.remainingWater))} g over target`

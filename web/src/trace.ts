@@ -8,6 +8,7 @@ const headerBytes = 16
 // Fixed-point packing keeps five seven-minute traces plus an in-flight upload
 // comfortably inside the existing 1.5 MB LittleFS partition.
 const recordBytes = 33
+const traceSampleHz = 2
 const missing32 = -0x80000000
 const missing16 = -0x8000
 
@@ -91,7 +92,7 @@ export function encodeTrace(samples: BrewTraceSample[]): { bytes: Uint8Array; me
   })
   const checksum = crc32(bytes.subarray(headerBytes))
   view.setUint32(12, checksum, true)
-  return { bytes, metadata: { schema: 1, sample_hz: 10, sample_count: samples.length, byte_length: bytes.byteLength, crc32: checksum.toString(16).padStart(8, '0'), available: true } }
+  return { bytes, metadata: { schema: 1, sample_hz: traceSampleHz, sample_count: samples.length, byte_length: bytes.byteLength, crc32: checksum.toString(16).padStart(8, '0'), available: true } }
 }
 
 export function decodeTrace(bytes: Uint8Array): BrewTraceSample[] {

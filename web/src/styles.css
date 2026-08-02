@@ -34,9 +34,9 @@
   --led-yellow: #e5b800;
   --led-red: #d62f2f;
   --led-purple: #a000ff;
-  --chart-total: #512612;
-  --chart-upper: #336b8e;
-  --chart-lower: #247a36;
+  --chart-total: #f27624;
+  --chart-upper: #8b2bb8;
+  --chart-lower: #2f8f4e;
   --brew-focus-bg: #080a08;
 }
 
@@ -282,12 +282,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 18px 18px 10px;
-  background: #fbfaf9;
+  background: linear-gradient(180deg, #fbfaf9 0%, #f4f1ed 100%);
   overflow: hidden;
 }
 
 .capture-chart { width: 100%; min-height: 332px; }
 .capture-chart .uplot { max-width: 100%; font-family: inherit; }
+.capture-chart .u-under { opacity: 0.92; }
 .capture-chart .u-legend { margin-bottom: 10px; color: var(--text); font-size: 0.78rem; }
 .capture-chart .u-legend .u-series { padding: 3px 9px; }
 .capture-chart .u-legend .u-label { font-weight: 650; }
@@ -1189,8 +1190,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brew-graph__milestones { min-height: 28px; margin-bottom: 8px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 .brew-graph__milestone { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--app-line); border-radius: 999px; color: var(--app-muted); background: var(--app-surface-2); font-size: .68rem; font-weight: 650; }
 .brew-graph__milestone--pour { border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-line)); color: var(--app-accent); }
-.brew-graph__plot { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
+.brew-graph__plot { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; border-radius: 14px; background: linear-gradient(180deg, var(--app-surface) 0%, var(--app-surface-2) 100%); }
 .brew-graph__plot .uplot { max-width: 100%; }
+.brew-graph__plot .u-under { opacity: 0.92; }
 .brew-graph__plot .u-legend { margin-bottom: 8px; color: var(--app-text); font-size: .72rem; }
 .brew-graph__plot .u-series { padding: 3px 8px; }
 .brew-graph__empty { position: absolute; inset: 108px 20px 26px; margin: 0; display: grid; place-items: center; color: var(--app-muted); text-align: center; font-size: .8rem; pointer-events: none; }

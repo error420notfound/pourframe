@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { buildSchedule, createId, formatRecipeWeight, normalizeRecipe, validateRecipe } from './brew'
 import { snapshotCoffeeBag } from './coffeeBag'
-import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, type BrewMachineEvent } from './brewMachine'
+import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, type BrewMachineEvent } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
 import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus, CoffeeBag, StepTransition } from './brewTypes'
 import { playCue } from './audio'
@@ -172,7 +172,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
 
   useEffect(() => {
     if (machine.mode !== 'device') return
-    const liveAuthority = connection === 'online' && completePairedTelemetry(telemetry)
+    const liveAuthority = connection === 'online' && liveScaleTelemetry(telemetry)
     const activePhase = machine.phase === 'POUR_ACTIVE' || machine.phase === 'STEP_COUNTDOWN' ||
       machine.phase === 'WAITING_FOR_STABLE_BASELINE' || machine.phase === 'DRAWDOWN'
     if (!liveAuthority && activePhase && !deviceBlocked) {

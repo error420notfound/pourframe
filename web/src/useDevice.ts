@@ -19,6 +19,7 @@ export type BrowserNetworkState = 'online' | 'offline'
 export type DeviceAvailability = 'connecting' | 'offline' | 'stale' | 'partial' | 'online'
 
 const telemetryWatchdogMs = 3000
+const telemetryPublicationMs = 500
 
 interface PendingCommand {
   resolve: (ack: ProtocolAck) => void
@@ -49,9 +50,11 @@ export function deriveDeviceAvailability(
 
   const upperUsable = usableScale(telemetry.scales.upper)
   const lowerUsable = usableScale(telemetry.scales.lower)
-  if (upperUsable !== lowerUsable || telemetry.total.partial) return 'partial'
-  if (!upperUsable || !lowerUsable || !telemetry.total.available || !telemetry.measurement.pair_valid ||
-      telemetry.measurement.pair_status !== 'synchronized') return 'stale'
+  if (upperUsable !== lowerUsable) return 'partial'
+  // Pair quality is measurement confidence, not device availability. A
+  // recently valid channel can survive a one-sided sample, so do not make a
+  // fresh, connected scale look offline because this frame is unsynchronized.
+  if (!upperUsable || !lowerUsable || !telemetry.total.available) return 'stale'
   return 'online'
 }
 
@@ -247,7 +250,7 @@ function mockStateAt(seconds: number): {
 function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTelemetry {
   const seconds = elapsedMs / 1000
   const scenario = mockStateAt(seconds)
-  const lastSampleMs = current.uptime_ms + 100
+  const lastSampleMs = current.uptime_ms + telemetryPublicationMs
   const scales: Record<ScaleId, ScaleTelemetry> = {
     upper: {
       ...current.scales.upper,
@@ -288,7 +291,7 @@ function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTel
   return {
     ...current,
     seq: current.seq + 1,
-    uptime_ms: current.uptime_ms + 100,
+    uptime_ms: current.uptime_ms + telemetryPublicationMs,
     scales,
     total,
     measurement: {
@@ -405,7 +408,7 @@ export function useDevice() {
         return next
       })
       setLastUpdateAt(Date.now())
-    }, 100)
+    }, telemetryPublicationMs)
     return () => window.clearInterval(interval)
   }, [reconnectGeneration])
 

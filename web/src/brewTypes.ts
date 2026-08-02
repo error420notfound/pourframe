@@ -102,7 +102,7 @@ export interface SensorSummary {
 
 export interface TraceMetadata {
   schema: 1
-  sample_hz: 10
+  sample_hz: 2 | 10
   sample_count: number
   byte_length: number
   crc32: string

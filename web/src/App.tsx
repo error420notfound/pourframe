@@ -5,7 +5,7 @@ import { setAudioEnabled } from './audio'
 import { CheckIcon, ClockIcon, CloseIcon, SettingsIcon } from './icons'
 import { buildSchedule, createId, expectedRecipeYield, formatRecipeInput, formatRecipeWeight, formatTime, migrateRecipe, normalizeRecipe, updateRecipeNumber, validateRecipe } from './brew'
 import { BrewGraph, brewMilestones } from './BrewGraph'
-import { completePairedTelemetry, type BrewMachineState } from './brewMachine'
+import { completePairedTelemetry, liveScaleTelemetry, type BrewMachineState } from './brewMachine'
 import { tareBothScales } from './brewSession'
 import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus, CoffeeBag as CoffeeBagRecord } from './brewTypes'
 import { CoffeeBagWorkspace } from './CoffeeBagWorkspace'
@@ -686,7 +686,7 @@ function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relativ
   const stepWaterAdded = mode === 'device' ? relative.stepWaterAdded : null
   const measuredRate = mode === 'device' && telemetry?.total.available ? telemetry.total.pour_rate_g_s : null
   const remaining = stepWaterAdded == null ? null : stepTarget - stepWaterAdded
-  const warning = mode === 'timer_only' ? 'Timer-only · scale data unavailable' : phase === 'WAITING_FOR_STABLE_BASELINE' ? 'Waiting for synchronized scale data.' : telemetry?.total.partial ? 'Partial measurement · reduced confidence' : !completePairedTelemetry(telemetry) ? 'Scale data unavailable or unsynchronized' : null
+  const warning = mode === 'timer_only' ? 'Timer-only · scale data unavailable' : phase === 'WAITING_FOR_STABLE_BASELINE' ? 'Waiting for synchronized scale data.' : telemetry?.total.partial ? 'Partial measurement · reduced confidence' : !liveScaleTelemetry(telemetry) ? 'Scale connection unavailable' : !completePairedTelemetry(telemetry) ? 'Waiting for synchronized scale data.' : null
   return <section className={warning ? 'brew-readings brew-readings--warning' : 'brew-readings'} aria-label="Live brew readings">
     <div className="brew-readings__tools"><strong>Brew readings</strong><button className="brew-secondary" disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button">{dualTare.busy ? 'Taring…' : 'Tare both scales'}</button></div>
     {dualTare.message ? <p className="dual-tare-message" role="status">{dualTare.message}</p> : null}
@@ -807,7 +807,7 @@ function RecipeWorkspace({ recipes, active, onSelect, onSave, onDelete }: { reci
 }
 
 function HistoryBrewItem({ brew }: { brew: BrewRecord }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(() => Boolean(brew.trace?.available))
   const [samples, setSamples] = useState<BrewTraceSample[] | null>(null)
   const [traceState, setTraceState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [traceMessage, setTraceMessage] = useState('')
@@ -821,11 +821,10 @@ function HistoryBrewItem({ brew }: { brew: BrewRecord }) {
       setTraceState('error'); setTraceMessage(error instanceof Error ? error.message : 'The saved trace could not be loaded.')
     }
   }, [brew.id, brew.trace?.available])
-  const toggle = () => {
-    const next = !expanded
-    setExpanded(next)
-    if (next && traceState === 'idle' && brew.trace?.available) void load()
-  }
+  useEffect(() => {
+    if (expanded && traceState === 'idle' && brew.trace?.available) void load()
+  }, [brew.trace?.available, expanded, load, traceState])
+  const toggle = () => setExpanded((value) => !value)
   const milestones = useMemo(() => brewMilestones(brew.recipe, brew.schedule, brew.transitions), [brew.recipe, brew.schedule, brew.transitions])
   return <article className={expanded ? 'history-brew history-brew--expanded' : 'history-brew'}>
     <button aria-expanded={expanded} className="history-brew__summary" onClick={toggle} type="button">
@@ -837,7 +836,7 @@ function HistoryBrewItem({ brew }: { brew: BrewRecord }) {
       {!brew.trace?.available ? <p>This timer-only or legacy brew has no recorded scale graph.</p> : null}
       {traceState === 'loading' ? <p>Loading saved trace…</p> : null}
       {traceState === 'error' ? <div className="history-trace-error"><p role="alert">{traceMessage}</p><button className="brew-secondary" onClick={() => void load()}>Retry</button></div> : null}
-      {traceState === 'ready' && samples ? <BrewGraph compact samples={samples} milestones={milestones} emptyMessage="This brew trace contains no samples." /> : null}
+      {traceState === 'ready' && samples ? <BrewGraph compact samples={samples} milestones={milestones} emptyMessage="This brew trace contains no plottable scale values." /> : null}
     </div> : null}
   </article>
 }
