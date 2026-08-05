@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { buildSchedule, createId, formatRecipeWeight, normalizeRecipe, validateRecipe } from './brew'
+import { buildSchedule, createId, formatRecipeWeight, normalizeRecipe, stepCueLeadSeconds, validateRecipe } from './brew'
 import { snapshotCoffeeBag } from './coffeeBag'
 import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, type BrewMachineEvent } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
@@ -138,7 +138,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
       if (elapsedMs >= next.start * 1000) event({ type: 'DRAWDOWN' })
       return
     }
-    if (elapsedMs >= Math.max(0, next.start * 1000 - 5000)) beginCountdown(nextIndex)
+    if (elapsedMs >= Math.max(0, next.start * 1000 - stepCueLeadSeconds * 1000)) beginCountdown(nextIndex)
   }, [beginCountdown, elapsedMs, event, machine.currentStepIndex, machine.phase, schedule])
 
   useEffect(() => {

@@ -209,6 +209,17 @@ bool UserDataStore::validRecipe(JsonObjectConst recipe, String &error) const {
       return false;
     }
   }
+  if (!recipe["starred"].isNull() && !recipe["starred"].is<bool>()) {
+    error = "invalid_recipe_starred";
+    return false;
+  }
+  if (!recipe["serveStyle"].isNull()) {
+    const char *serveStyle = recipe["serveStyle"] | "";
+    if (strcmp(serveStyle, "hot") != 0 && strcmp(serveStyle, "iced") != 0) {
+      error = "invalid_recipe_serve_style";
+      return false;
+    }
+  }
   return true;
 }
 
@@ -255,6 +266,10 @@ bool UserDataStore::validCoffeeBag(JsonObjectConst coffeeBag, String &error) con
   }
   for (JsonVariantConst item : processing) {
     if (!boundedString(item, 1, 40)) { error = "invalid_coffee_bag_processing"; return false; }
+  }
+  if (!coffeeBag["starred"].isNull() && !coffeeBag["starred"].is<bool>()) {
+    error = "invalid_coffee_bag_starred";
+    return false;
   }
   return true;
 }

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Minimize2, Pause, Play, Square, Volume2, VolumeX } from 'lucide-react'
+import { ArrowsPointingInIcon as Minimize2, PauseIcon as Pause, PlayIcon as Play, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StopIcon as Square } from '@heroicons/react/24/solid'
 import { deriveActiveBrewSummary } from './brewSummaryModel'
 import { formatRecipeWeight, formatTime } from './brew'
 import { liveScaleTelemetry, type BrewMachineState } from './brewMachine'
 import type { BrewMode, BrewRecipe, BrewStatus, BrewStep } from './brewTypes'
+import { BrewGraph, type BrewMilestone } from './BrewGraph'
+import type { BrewTraceBuffer } from './trace'
 import type { DeviceTelemetry } from './types'
 
 export interface ActiveBrewSummaryProps {
@@ -18,6 +20,8 @@ export interface ActiveBrewSummaryProps {
   machine: BrewMachineState
   message: string
   sound: boolean
+  traceBuffer: BrewTraceBuffer
+  milestones: BrewMilestone[]
   onPauseResume: () => void
   onEnd: () => Promise<void>
   onToggleSound: () => void
@@ -42,6 +46,8 @@ export function ActiveBrewSummary({
   machine,
   message,
   sound,
+  traceBuffer,
+  milestones,
   onPauseResume,
   onEnd,
   onToggleSound,
@@ -126,7 +132,6 @@ export function ActiveBrewSummary({
       }
       document.removeEventListener('fullscreenchange', onFullscreenChange)
       window.removeEventListener('keydown', onKeyDown)
-      if (fullscreenWasActiveRef.current && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
     }
   }, [exit, onExit])
 
@@ -175,16 +180,7 @@ export function ActiveBrewSummary({
       ref={overlayRef}
       role="dialog"
     >
-      <div
-        aria-label="Brew progress"
-        aria-valuemax={100}
-        aria-valuemin={0}
-        aria-valuenow={summary.progressPercent}
-        aria-valuetext={`${summary.progressPercent}% of brew time elapsed`}
-        className="active-brew-summary__progress"
-        role="progressbar"
-        style={{ transform: `scaleX(${summary.progress})` }}
-      />
+      <div className="active-brew-summary__graph" aria-hidden="true"><BrewGraph decorative elapsedSeconds={elapsed} emptyMessage="Live graph begins with Bloom." milestones={milestones} source={traceBuffer} timeDomainSeconds={recipe.brewTime} variant="backdrop" weightDomainTargetGrams={recipe.water} /></div>
       <div aria-hidden={confirmingEnd || undefined} className="active-brew-summary__content">
         <header className="active-brew-summary__header">
           <div className="active-brew-summary__stage">
@@ -223,6 +219,7 @@ export function ActiveBrewSummary({
             <small>{remainingCopy} · {formatRecipeWeight(recipe.water)} g target</small>
           </section>
         </div>
+        <span className="active-brew-summary__progress-label" role="status">{summary.progressPercent}% of brew time elapsed</span>
 
         <footer className="active-brew-summary__footer">
           <div className="active-brew-summary__next" aria-live="polite">

@@ -5,8 +5,9 @@ import { createCoffeeBag, filterCoffeeBags, normalizeCoffeeBag, snapshotCoffeeBa
 import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
 import { tareBothScales } from './brewSession'
-import { brewMilestones, hasPlottableValues, traceColumns } from './BrewGraph'
+import { brewMilestones, columnsWithinTimeDomain, hasPlottableValues, milestoneIsImminent, scheduledBrewMilestones, traceColumns, weightDomainForTarget } from './BrewGraph'
 import { defaultRecipes } from './defaultRecipes'
+import { defaultCoffeeBags } from './defaultCoffeeBags'
 import { LibraryApiError, loadBrewTrace, parseLegacyBrews, parseLegacyRecipes, retainNewestBrews, retryOnConflict } from './library'
 import { BrewTraceBuffer, decodeTrace, encodeTrace, traceSample } from './trace'
 import type { DeviceTelemetry, ProtocolAck } from './types'
@@ -125,8 +126,12 @@ describe('recipe semantics', () => {
   })
 
   it('migrates legacy pours literally and validates bloom', () => {
-    const legacy = { ...defaultRecipes[0], poursAfterBloom: undefined, pours: 4 } as unknown as typeof defaultRecipes[number]
-    expect(migrateRecipe(legacy).poursAfterBloom).toBe(4)
+    const { starred: _starred, serveStyle: _serveStyle, ...legacyRecipe } = defaultRecipes[0]
+    const legacy = { ...legacyRecipe, poursAfterBloom: undefined, pours: 4 } as unknown as typeof defaultRecipes[number]
+    const migrated = migrateRecipe(legacy)
+    expect(migrated.poursAfterBloom).toBe(4)
+    expect(migrated.starred).toBe(false)
+    expect(migrated.serveStyle).toBe('hot')
     expect(validateRecipe({ ...defaultRecipes[0], bloom: 320 }).errors.bloom).toBeTruthy()
   })
 
@@ -138,6 +143,12 @@ describe('recipe semantics', () => {
 })
 
 describe('coffee bag inventory', () => {
+  it('ships valid starter bags, including a starred depleted bag', () => {
+    expect(defaultCoffeeBags).toHaveLength(3)
+    expect(defaultCoffeeBags.every((bag) => validateCoffeeBag(bag).valid)).toBe(true)
+    expect(defaultCoffeeBags.some((bag) => bag.starred && bag.remainingWeightG === 0)).toBe(true)
+  })
+
   it('validates required identity, weights, and conditional pre-ground size', () => {
     const bag = { ...createCoffeeBag(), name: 'Ethiopia Buku', roastery: 'Local Roaster' }
     expect(validateCoffeeBag(bag).valid).toBe(true)
@@ -158,6 +169,9 @@ describe('coffee bag inventory', () => {
     expect(bag.tastingNotes).toEqual(['Berry', 'Cocoa', 'Floral'])
     expect(bag.processing).toEqual(['Washed', 'Fermented', 'Sun-dried'])
     expect(snapshotCoffeeBag(bag)).not.toHaveProperty('remainingWeightG')
+    expect(bag.starred).toBe(false)
+    const { starred: _starred, ...legacyBag } = bag
+    expect(normalizeCoffeeBag(legacyBag as typeof bag).starred).toBe(false)
   })
 
   it('keeps active bags first and supports filtering and stable sort choices', () => {
@@ -320,9 +334,33 @@ describe('2 Hz published trace format', () => {
     expect(hasPlottableValues(traceColumns([sample]))).toBe(true)
     expect(hasPlottableValues(traceColumns([{ ...sample, upper: Number.NaN, lower: Number.NaN, total: Number.NaN }]))).toBe(false)
   })
+
+  it('keeps the fullscreen backdrop fixed to recipe time without discarding the recorded overrun', () => {
+    const early = traceSample(telemetry(), undefined, 45_000, 0)
+    const overrun = traceSample(telemetry(), undefined, 240_000, 0)
+    const allColumns = traceColumns([early, overrun])
+    expect(columnsWithinTimeDomain(allColumns, 180)).toEqual([[45], [20], [10], [10]])
+    expect(allColumns).toEqual([[45, 240], [20, 20], [10, 10], [10, 10]])
+  })
+
+  it('uses the recipe water target as the fullscreen vertical frame until real data exceeds it', () => {
+    const inRange = [[0, 30], [0, 120], [0, 60], [0, 60]] as const
+    const outOfRange = [[0, 30], [-5, 340], [0, 60], [0, 60]] as const
+    expect(weightDomainForTarget(inRange.map((series) => [...series]) as [number[], Array<number | null>, Array<number | null>, Array<number | null>], 320)).toEqual([0, 320])
+    expect(weightDomainForTarget(outOfRange.map((series) => [...series]) as [number[], Array<number | null>, Array<number | null>, Array<number | null>], 320)).toEqual([-18.8, 353.8])
+  })
 })
 
 describe('brew graph milestones and dual tare', () => {
+  it('keeps every scheduled focus marker visible and emphasizes only the shared five-second cue window', () => {
+    const schedule = buildSchedule(defaultRecipes[0])
+    const markers = scheduledBrewMilestones(schedule)
+    expect(markers.map((marker) => marker.label)).toEqual(['Bloom', 'Pour 1', 'Pour 2', 'Pour 3', 'Final pour', 'Drawdown'])
+    expect(milestoneIsImminent(markers[1], markers[1].elapsedSeconds - 5)).toBe(true)
+    expect(milestoneIsImminent(markers[1], markers[1].elapsedSeconds - 5.1)).toBe(false)
+    expect(milestoneIsImminent(markers[1], markers[1].elapsedSeconds)).toBe(false)
+  })
+
   it('labels coffee and actual pour transitions without inventing missed points', () => {
     const recipe = { ...defaultRecipes[0], coffee: 16, water: 320, bloom: 60, poursAfterBloom: 4 }
     const schedule = buildSchedule(recipe)

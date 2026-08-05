@@ -13,6 +13,7 @@ import type {
   TargetId,
   TotalTelemetry,
 } from './types'
+import type { BrewRecipe } from './brewTypes'
 
 export type ConnectionState = 'connecting' | 'online' | 'offline'
 export type BrowserNetworkState = 'online' | 'offline'
@@ -25,6 +26,13 @@ interface PendingCommand {
   resolve: (ack: ProtocolAck) => void
   reject: (error: Error) => void
   timeout: number
+}
+
+export interface MockBrewProgress {
+  totalWaterG: number
+  lowerWaterG: number
+  targetWaterG: number
+  lastUpdatedAt: number
 }
 
 const mockMode = import.meta.env.DEV && !import.meta.env.VITE_DEVICE_HOST
@@ -247,9 +255,49 @@ function mockStateAt(seconds: number): {
     state: 'STABLE', confidence: 0.94, lowerFault: false }
 }
 
-function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry): DeviceTelemetry {
+export function advanceMockBrew(progress: MockBrewProgress, recipe: BrewRecipe, now: number) {
+  const elapsedSeconds = Math.max(0, now - progress.lastUpdatedAt) / 1000
+  if (elapsedSeconds === 0) return { upper: progress.totalWaterG - progress.lowerWaterG, lower: progress.lowerWaterG, upperSlope: 0, lowerSlope: 0, state: 'STABLE' as const }
+  const previousTotal = progress.totalWaterG
+  const previousLower = progress.lowerWaterG
+  progress.totalWaterG = Math.min(progress.targetWaterG, progress.totalWaterG + Math.max(0.1, recipe.flowRate) * elapsedSeconds)
+  const finalTarget = progress.targetWaterG >= recipe.water - 0.01 && progress.totalWaterG >= recipe.water - 0.01
+  const retainedWater = finalTarget ? Math.max(3, recipe.coffee * 0.22) : Math.max(8, recipe.bloom * 0.45)
+  const desiredLower = Math.max(0, progress.totalWaterG - retainedWater)
+  const transferRate = finalTarget ? Math.max(2.5, recipe.flowRate) : Math.max(1, recipe.flowRate * 0.58)
+  progress.lowerWaterG = Math.min(desiredLower, progress.lowerWaterG + transferRate * elapsedSeconds)
+  progress.lastUpdatedAt = now
+  const totalSlope = (progress.totalWaterG - previousTotal) / elapsedSeconds
+  const lowerSlope = (progress.lowerWaterG - previousLower) / elapsedSeconds
+  const upperSlope = totalSlope - lowerSlope
+  return {
+    upper: Math.max(0, progress.totalWaterG - progress.lowerWaterG),
+    lower: progress.lowerWaterG,
+    upperSlope,
+    lowerSlope,
+    state: totalSlope > 0.02 ? 'ACTIVE' as const : Math.abs(lowerSlope) > 0.02 ? 'DRAWDOWN' as const : 'STABLE' as const,
+  }
+}
+
+function recipeMockState(recipe: BrewRecipe, tared: Record<ScaleId, boolean>, progress: MockBrewProgress | null, now: number) {
+  if (!tared.upper || !tared.lower || !progress) {
+    return {
+      upper: tared.upper ? 0 : 18.4 + recipe.coffee,
+      lower: tared.lower ? 0 : 246.8,
+      upperSlope: 0,
+      lowerSlope: 0,
+      state: 'STABLE' as const,
+      confidence: 0.96,
+      lowerFault: false,
+    }
+  }
+  const readings = advanceMockBrew(progress, recipe, now)
+  return { ...readings, confidence: readings.state === 'STABLE' ? 0.96 : 0.91, lowerFault: false }
+}
+
+function mockTelemetryAt(elapsedMs: number, current: DeviceTelemetry, recipe: BrewRecipe, tared: Record<ScaleId, boolean>, progress: MockBrewProgress | null, now: number): DeviceTelemetry {
   const seconds = elapsedMs / 1000
-  const scenario = mockStateAt(seconds)
+  const scenario = mockScenario === 'healthy' ? recipeMockState(recipe, tared, progress, now) : mockStateAt(seconds)
   const lastSampleMs = current.uptime_ms + telemetryPublicationMs
   const scales: Record<ScaleId, ScaleTelemetry> = {
     upper: {
@@ -341,7 +389,7 @@ function requestId() {
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-export function useDevice() {
+export function useDevice(recipe: BrewRecipe) {
   const [telemetry, setTelemetry] = useState<DeviceTelemetry | null>(mockMode && mockScenario !== 'disconnected' ? initialTelemetry : null)
   const [connection, setConnection] = useState<ConnectionState>(mockMode ? (mockScenario === 'disconnected' ? 'offline' : 'online') : 'connecting')
   const [lastUpdateAt, setLastUpdateAt] = useState<number>(mockMode ? Date.now() : 0)
@@ -356,10 +404,13 @@ export function useDevice() {
   const reconnectTimerRef = useRef<number | null>(null)
   const telemetryTimerRef = useRef<number | null>(null)
   const mockTaredRef = useRef<Record<ScaleId, boolean>>({ upper: false, lower: false })
+  const mockBrewRef = useRef<MockBrewProgress | null>(null)
   const mockDroppedRef = useRef(false)
   const mockRecoveredRef = useRef(false)
   const mockDropoutAtRef = useRef<number | null>(null)
   const commandAuthorityRef = useRef(false)
+  const recipeRef = useRef(recipe)
+  recipeRef.current = recipe
 
   useEffect(() => {
     const updateBrowserNetwork = () => setBrowserNetwork(navigator.onLine === false ? 'offline' : 'online')
@@ -386,7 +437,7 @@ export function useDevice() {
         return
       }
       setTelemetry((current) => {
-        const next = mockTelemetryAt(elapsedMs, current ?? initialTelemetry)
+        const next = mockTelemetryAt(elapsedMs, current ?? initialTelemetry, recipeRef.current, mockTaredRef.current, mockBrewRef.current, Date.now())
         if (mockScenario === 'partial-upper') {
           next.scales.upper = { ...next.scales.upper, available: false, ready: false, stale: true, disconnected: true }
           next.total = deriveTotal(next.scales, next.total)
@@ -402,8 +453,6 @@ export function useDevice() {
           next.scales.lower = { ...next.scales.lower, calibration_valid: false }
           next.total = deriveTotal(next.scales, next.total)
         }
-        if (mockTaredRef.current.upper) next.scales.upper = { ...next.scales.upper, grams: next.scales.upper.grams - 18.4, calibrated: next.scales.upper.calibrated - 18.4 }
-        if (mockTaredRef.current.lower) next.scales.lower = { ...next.scales.lower, grams: next.scales.lower.grams - 246.8, calibrated: next.scales.lower.calibrated - 246.8 }
         next.total = deriveTotal(next.scales, next.total)
         return next
       })
@@ -523,6 +572,7 @@ export function useDevice() {
       if (command === 'tare') {
         if (mockScenario === 'dropout' && mockDropoutAtRef.current == null) mockDropoutAtRef.current = Date.now() + 10_000
         if (!channel || channel === 'total') return Promise.reject(new Error('Total weight cannot be tared directly'))
+        if (channel === 'upper') mockBrewRef.current = null
         mockTaredRef.current[channel] = true
         setTelemetry((current) => {
           if (!current) return current
@@ -588,6 +638,19 @@ export function useDevice() {
             },
           }
         })
+      } else if (command === 'brew_step_activate') {
+        const now = Date.now()
+        const activeRecipe = recipeRef.current
+        const progress = mockBrewRef.current ?? {
+          totalWaterG: Math.max(0, payload.baseline_total_grams),
+          lowerWaterG: 0,
+          targetWaterG: Math.max(0, payload.baseline_total_grams),
+          lastUpdatedAt: now,
+        }
+        advanceMockBrew(progress, activeRecipe, now)
+        progress.targetWaterG = Math.min(activeRecipe.water, Math.max(progress.totalWaterG, payload.cumulative_target_grams))
+        progress.lastUpdatedAt = now
+        mockBrewRef.current = progress
       }
       return Promise.resolve({ v: 1, type: 'ack', id: 'mock', ok: true, message: 'Accepted' } as ProtocolAck)
     }

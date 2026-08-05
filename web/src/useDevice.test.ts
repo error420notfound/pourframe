@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceTelemetry } from './types'
-import { deriveDeviceAvailability } from './useDevice'
+import { advanceMockBrew, deriveDeviceAvailability } from './useDevice'
+import { defaultRecipes } from './defaultRecipes'
 
 function telemetry(overrides: Partial<DeviceTelemetry> = {}): DeviceTelemetry {
   const scale = {
@@ -110,5 +111,21 @@ describe('deriveDeviceAvailability', () => {
     const value = telemetry()
     value.total = { ...value.total, partial: true }
     expect(deriveDeviceAvailability('online', value, now - 100, now)).toBe('online')
+  })
+})
+
+describe('recipe-driven mock telemetry', () => {
+  it('adds only recipe water and drains it from the upper scale to the carafe', () => {
+    const recipe = defaultRecipes[0]
+    const progress = { totalWaterG: 0, lowerWaterG: 0, targetWaterG: recipe.bloom, lastUpdatedAt: 0 }
+    const bloom = advanceMockBrew(progress, recipe, 1000)
+    expect(bloom.state).toBe('ACTIVE')
+    expect(bloom.upper + bloom.lower).toBeCloseTo(recipe.flowRate, 6)
+    expect(bloom.upper + bloom.lower).toBeLessThanOrEqual(recipe.bloom)
+
+    progress.targetWaterG = recipe.water
+    const drawdown = advanceMockBrew(progress, recipe, 120_000)
+    expect(drawdown.upper + drawdown.lower).toBeCloseTo(recipe.water, 6)
+    expect(drawdown.lower).toBeGreaterThan(drawdown.upper)
   })
 })

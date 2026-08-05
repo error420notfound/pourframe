@@ -1,4 +1,12 @@
 @font-face {
+  font-family: "Geist";
+  src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 900;
+}
+
+@font-face {
   font-family: "Geist Pixel Line";
   src: url("../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Line.woff2") format("woff2");
   font-display: swap;
@@ -15,7 +23,7 @@
 }
 
 :root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #171514;
   background: #ffffff;
   font-synthesis: none;
@@ -313,7 +321,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   align-items: baseline;
   min-height: 154px;
   padding-top: 20px;
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", sans-serif;
+  font-family: "Oswald Variable", Oswald, sans-serif;
+  font-weight: 300;
   font-variant-numeric: tabular-nums lining-nums;
   white-space: nowrap;
 }
@@ -474,7 +483,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   display: flex;
   align-items: baseline;
   min-height: 214px;
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", sans-serif;
+  font-family: "Oswald Variable", Oswald, sans-serif;
+  font-weight: 300;
   font-variant-numeric: tabular-nums lining-nums;
   white-space: nowrap;
 }
@@ -965,17 +975,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: var(--focus-text);
   isolation: isolate;
 }
-.active-brew-summary__progress {
+.active-brew-summary::after {
   position: absolute;
-  z-index: -1;
   inset: 0;
-  border-radius: 0;
-  background: var(--focus-fill);
-  transform-origin: left center;
-  transition: transform 180ms linear;
+  z-index: 1;
+  content: '';
+  background: linear-gradient(90deg, rgba(6, 15, 9, .68) 0%, rgba(6, 15, 9, .34) 48%, rgba(6, 15, 9, .62) 100%), linear-gradient(180deg, rgba(6, 15, 9, .2), rgba(6, 15, 9, .58));
   pointer-events: none;
 }
+.active-brew-summary__graph { position: absolute; z-index: 0; inset: 0; pointer-events: none; background-image: linear-gradient(rgba(123, 215, 150, .08) 1px, transparent 1px), linear-gradient(90deg, rgba(123, 215, 150, .08) 1px, transparent 1px); background-size: 100% 20%, 10% 100%; }
+.active-brew-summary__graph .brew-graph, .active-brew-summary__graph .brew-graph__drawing, .active-brew-summary__graph .brew-graph__plot { width: 100%; height: 100%; min-height: 0; max-width: none; border-radius: 0; background: transparent; overflow: hidden; }
+.active-brew-summary__graph .uplot { max-width: none; }
+.active-brew-summary__graph .brew-graph__empty { z-index: 1; inset: 0; padding: 0 24px; color: rgba(246, 247, 244, .72); font-size: .82rem; letter-spacing: .08em; text-transform: uppercase; }
 .active-brew-summary__content {
+  position: relative;
+  z-index: 2;
   min-height: 100%;
   padding:
     max(26px, env(safe-area-inset-top))
@@ -986,6 +1000,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: clamp(20px, 4vh, 54px);
 }
+.active-brew-summary__progress-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.active-brew-summary__content--preparing { grid-template-rows: auto minmax(0, 1fr); }
+.focus-prep { width: min(620px, 100%); margin: auto; padding: clamp(22px, 4vw, 38px); border: 1px solid rgba(246, 247, 244, .16); border-radius: 22px; display: grid; gap: 16px; background: rgba(12, 24, 15, .66); box-shadow: 0 24px 90px rgba(0, 0, 0, .28); backdrop-filter: blur(18px); }
+.focus-prep .prep-recipe { background: rgba(246, 247, 244, .08); }.focus-prep .prep-recipe span, .focus-prep .prep-recipe small, .focus-prep .prep-decision p { color: var(--focus-muted); }.focus-prep .prep-check { border-color: rgba(246, 247, 244, .16); background: rgba(246, 247, 244, .05); }.focus-prep .prep-health { background: rgba(246, 247, 244, .07); }.focus-prep .button--secondary { border-color: rgba(246, 247, 244, .2); background: rgba(246, 247, 244, .08); color: var(--focus-text); }.focus-prep .button--primary { border-color: var(--focus-accent); background: var(--focus-accent); color: #092111; }
 .active-brew-summary__header {
   display: flex;
   align-items: flex-start;
@@ -1067,7 +1085,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .active-brew-summary__metric > strong em {
   margin-left: .1em;
   color: var(--focus-muted);
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
   font-size: .18em;
   font-style: normal;
   font-weight: 680;
@@ -1187,11 +1205,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brew-graph-card .section-heading > span { color: var(--app-muted); font-size: .75rem; font-weight: 700; }
 .brew-graph { position: relative; min-width: 0; min-height: 300px; }
 .brew-graph--compact { min-height: 230px; }
+.brew-graph--backdrop { min-height: 0; }
 .brew-graph__milestones { min-height: 28px; margin-bottom: 8px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 .brew-graph__milestone { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--app-line); border-radius: 999px; color: var(--app-muted); background: var(--app-surface-2); font-size: .68rem; font-weight: 650; }
 .brew-graph__milestone--pour { border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-line)); color: var(--app-accent); }
-.brew-graph__plot { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; border-radius: 14px; background: linear-gradient(180deg, var(--app-surface) 0%, var(--app-surface-2) 100%); }
+.brew-graph__drawing { position: relative; min-width: 0; }.brew-graph__plot { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; border-radius: 14px; background: linear-gradient(180deg, var(--app-surface) 0%, var(--app-surface-2) 100%); }
 .brew-graph__plot .uplot { max-width: 100%; }
+.brew-graph__trace { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }.brew-graph__trace path { fill: none; stroke-linecap: round; stroke-linejoin: round; }.brew-graph__trace .brew-graph__trace-area { fill: rgba(123, 215, 150, .16); stroke: none; }.brew-graph__trace-total { stroke: var(--chart-total, #512612); stroke-width: 5; }.brew-graph__trace-upper { stroke: var(--chart-upper, #336b8e); stroke-width: 3.5; opacity: .82; }.brew-graph__trace-lower { stroke: var(--chart-lower, #247a36); stroke-width: 3.5; opacity: .82; }.brew-graph__trace--backdrop .brew-graph__trace-total { stroke: #7bd796; stroke-width: 6; }.brew-graph__trace--backdrop .brew-graph__trace-upper { stroke: #8ac7df; stroke-width: 4; opacity: .76; }.brew-graph__trace--backdrop .brew-graph__trace-lower { stroke: #b2dfa8; stroke-width: 4; opacity: .76; }
 .brew-graph__plot .u-under { opacity: 0.92; }
 .brew-graph__plot .u-legend { margin-bottom: 8px; color: var(--app-text); font-size: .72rem; }
 .brew-graph__plot .u-series { padding: 3px 8px; }
@@ -1325,3 +1345,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; }.brew-progress span, .active-brew-summary__progress { transition: none; } }
+
+/* Library-first shell */
+.settings-tab { min-height: 38px; padding: 0 12px; border: 1px solid var(--app-line); border-radius: 10px; display: inline-flex; align-items: center; gap: 7px; color: var(--app-muted); text-decoration: none; font-size: .82rem; font-weight: 600; }
+.settings-tab svg { width: 16px; height: 16px; }.settings-tab.active { color: var(--app-text); background: var(--app-surface-2); }
+.library-workspace { display: grid; gap: 22px; padding: clamp(22px, 4vw, 46px); border: 1px solid var(--app-line); border-radius: 24px; background: var(--app-surface); }
+.library-workspace__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }.library-workspace__header h2 { margin: 0; color: var(--app-text); font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1; letter-spacing: -.055em; }.library-workspace__header p:not(.brew-eyebrow) { max-width: 460px; margin: 10px 0 0; color: var(--app-muted); line-height: 1.5; }
+.library-header-actions, .library-controls, .view-toggle, .modal-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }.library-controls { padding: 13px; border: 1px solid var(--app-line); border-radius: 14px; background: var(--app-surface-2); }.library-controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--app-muted); font-size: .76rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }.library-controls select { min-height: 34px; padding: 0 9px; border: 1px solid var(--app-line); border-radius: 8px; background: var(--app-surface); color: var(--app-text); font: inherit; text-transform: none; letter-spacing: 0; }
+.view-toggle { margin-right: auto; padding: 3px; border: 1px solid var(--app-line); border-radius: 10px; }.view-toggle button, .modal-toolbar button { min-height: 32px; padding: 0 9px; border: 0; border-radius: 7px; display: inline-flex; align-items: center; gap: 6px; background: transparent; color: var(--app-muted); font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer; }.view-toggle button[aria-pressed='true'] { color: var(--app-text); background: var(--app-surface); box-shadow: 0 1px 4px rgba(0,0,0,.08); }.view-toggle svg, .modal-toolbar svg { width: 15px; height: 15px; }
+.library-group { display: grid; gap: 12px; }.library-group h3 { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--app-text); font-size: .92rem; }.library-group h3 small { min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; display: inline-grid; place-items: center; background: var(--app-surface-2); color: var(--app-muted); font-size: .67rem; }
+.bag-collection { display: grid; gap: 12px; }.bag-collection--grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }.bag-collection--list { grid-template-columns: 1fr; }.bag-card, .recipe-card { position: relative; min-width: 0; border: 1px solid var(--app-line); border-radius: 15px; background: var(--app-bg); transition: border-color .18s ease, transform .18s ease; }.bag-card:hover, .recipe-card:hover { border-color: color-mix(in srgb, var(--app-text) 34%, var(--app-line)); transform: translateY(-1px); }.bag-card--depleted { opacity: .68; }.bag-card__open, .recipe-card__open { width: 100%; min-height: 130px; padding: 17px 46px 17px 17px; border: 0; display: grid; align-content: start; gap: 6px; background: transparent; color: var(--app-text); text-align: left; cursor: pointer; }.bag-card__open strong, .recipe-card__open strong { font-size: 1rem; line-height: 1.2; }.bag-card__open span, .recipe-card__open span { color: var(--app-muted); font-size: .79rem; }.bag-card__open b { margin-top: 7px; font-family: "Geist Pixel Line", ui-monospace, monospace; font-size: .91rem; font-weight: 500; }.bag-card__open small, .recipe-card__open small { color: var(--app-muted); font-size: .72rem; line-height: 1.35; }.bag-collection--list .bag-card__open { min-height: 78px; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(130px, 1fr); align-items: center; }.bag-collection--list .bag-card__open strong { grid-column: 1; }.bag-collection--list .bag-card__open span { grid-column: 2; grid-row: 1; }.bag-collection--list .bag-card__open b { grid-column: 3; grid-row: 1; margin: 0; }.bag-collection--list .bag-card__open small { grid-column: 1 / -1; }
+.library-star { border: 0; color: var(--app-muted); background: transparent; cursor: pointer; }.bag-card > .library-star, .recipe-card > .library-star { position: absolute; top: 11px; right: 11px; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; }.library-star svg { width: 16px; height: 16px; }.library-star.active { color: #b37b1d; }.library-star.active svg { fill: currentColor; }.modal-toolbar { padding-bottom: 15px; border-bottom: 1px solid var(--app-line); }.modal-toolbar .danger { color: #b33a32; }
+.recipe-collection { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 12px; }.recipe-card__open { min-height: 136px; }.library-modal { width: min(760px, calc(100vw - 28px)); max-height: min(850px, calc(100dvh - 28px)); overflow: auto; }.library-modal__body { padding: 21px; display: grid; gap: 19px; }.library-detail { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }.library-detail > div { padding: 12px; border-radius: 11px; background: var(--app-surface-2); }.library-detail dt { color: var(--app-muted); font-size: .67rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }.library-detail dd { margin: 5px 0 0; color: var(--app-text); line-height: 1.35; }.library-detail > div:last-child:nth-child(odd) { grid-column: 1 / -1; }.button--full { width: 100%; justify-content: center; }.bag-edit-form, .recipe-edit-form { display: grid; gap: 16px; }.bag-edit-form .bag-section { padding: 0; border: 0; }.refill-form p { margin: 0; color: var(--app-muted); line-height: 1.5; }
+.brew-dock { position: fixed; z-index: 35; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); left: max(18px, env(safe-area-inset-left)); width: min(760px, calc(100% - 36px)); margin: 0 auto; padding: 11px 12px 11px 17px; border: 1px solid color-mix(in srgb, var(--app-line) 78%, transparent); border-radius: 17px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: color-mix(in srgb, var(--app-surface) 94%, transparent); box-shadow: 0 14px 38px rgba(0,0,0,.18); backdrop-filter: blur(18px); }.brew-dock__selection { min-width: 0; display: grid; gap: 2px; }.brew-dock__selection > span { color: var(--app-muted); font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }.brew-dock__selection strong { overflow: hidden; color: var(--app-text); font-size: .93rem; text-overflow: ellipsis; white-space: nowrap; }.brew-dock__selection small { overflow: hidden; color: var(--app-muted); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }.brew-dock .brew-primary { flex: 0 0 auto; }
+.appliance-body:has(.library-workspace), .appliance-body:has(.history-workspace) { padding-bottom: 132px; }
+@media (max-width: 640px) { .settings-tab span { display: none; }.settings-tab { width: 38px; padding: 0; justify-content: center; }.library-workspace { padding: 22px 16px 116px; border-radius: 18px; }.library-workspace__header { display: grid; }.library-header-actions { width: 100%; }.library-header-actions > button { flex: 1; justify-content: center; }.library-controls { align-items: stretch; }.view-toggle { width: 100%; margin-right: 0; }.view-toggle button { flex: 1; justify-content: center; }.library-controls label { flex: 1; justify-content: space-between; }.bag-collection--list .bag-card__open { min-height: 105px; grid-template-columns: 1fr 1fr; }.bag-collection--list .bag-card__open span { grid-column: 1; grid-row: 2; }.bag-collection--list .bag-card__open b { grid-column: 2; grid-row: 1; }.library-detail { grid-template-columns: 1fr; }.library-detail > div:last-child:nth-child(odd) { grid-column: auto; }.brew-dock { bottom: max(12px, env(safe-area-inset-bottom)); width: calc(100% - 24px); }.brew-dock .brew-primary { min-height: 44px; padding-inline: 13px; }.brew-dock .brew-primary svg { display: none; } }
+@media (max-width: 980px) { .appliance-header { grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; }.appliance-header nav { position: static; inset: auto; justify-content: center; box-shadow: none; }.appliance-header nav a { flex: 0 1 auto; } }
+@media (max-width: 640px) { .appliance-header { min-height: auto; padding: 8px 16px; grid-template-columns: 1fr auto; }.appliance-header nav { grid-column: 1 / -1; grid-row: 2; width: 100%; }.appliance-header nav a { flex: 1; }.device-status-banner { top: 122px; } }

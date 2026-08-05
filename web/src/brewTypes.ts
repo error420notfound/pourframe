@@ -6,6 +6,7 @@ export type BeanForm = 'Whole bean' | 'Pre-ground'
 export type BrewPhase = 'IDLE' | 'PREPARING' | 'READY' | 'STEP_COUNTDOWN' | 'WAITING_FOR_STABLE_BASELINE' | 'POUR_ACTIVE' | 'PAUSED' | 'DRAWDOWN' | 'COMPLETE' | 'ERROR'
 export type BrewStatus = 'idle' | 'preparing' | 'brewing' | 'paused' | 'complete'
 export type BrewMode = 'device' | 'timer_only'
+export type RecipeServeStyle = 'hot' | 'iced'
 
 export interface BrewRecipe {
   id: string
@@ -26,6 +27,10 @@ export interface BrewRecipe {
   equipment: string[]
   notes: string
   bloomEdited?: boolean
+  /** Persistent library preference. Legacy records migrate to false. */
+  starred: boolean
+  /** How this recipe is served. Legacy records migrate to hot. */
+  serveStyle: RecipeServeStyle
 }
 
 export interface CoffeeBag {
@@ -47,6 +52,8 @@ export interface CoffeeBag {
   processing: string[]
   createdAt: string
   updatedAt: string
+  /** Persistent library preference. Legacy records migrate to false. */
+  starred: boolean
 }
 
 export type CoffeeBagSnapshot = Omit<CoffeeBag, 'remainingWeightG' | 'createdAt' | 'updatedAt'>

@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import '@fontsource-variable/oswald'
 import App from './App'
 import { registerPourFrameServiceWorker } from './pwa'
 import './styles.css'

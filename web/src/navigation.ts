@@ -1,4 +1,4 @@
-export type AppTab = 'brew' | 'recipes' | 'history' | 'device'
+export type AppTab = 'brew' | 'beans' | 'recipes' | 'history' | 'device'
 export type RecipeLibraryView = 'coffee' | 'recipes'
 
 export interface AppNavigation {
@@ -6,30 +6,27 @@ export interface AppNavigation {
   recipeLibraryView: RecipeLibraryView
 }
 
-const recipeHashes: Record<RecipeLibraryView, string> = {
-  coffee: '#recipes/coffee-bags',
-  recipes: '#recipes/brew-recipes',
-}
-
 export function appHash(tab: AppTab, recipeLibraryView: RecipeLibraryView = 'coffee') {
-  return tab === 'recipes' ? recipeHashes[recipeLibraryView] : `#${tab}`
+  void recipeLibraryView
+  return `#${tab}`
 }
 
 export function parseAppHash(hash: string, fallbackRecipeView: RecipeLibraryView = 'coffee'): AppNavigation {
   switch (hash.replace(/^#/, '').replace(/\/+$/, '')) {
     case 'recipes':
-      return { tab: 'recipes', recipeLibraryView: fallbackRecipeView }
-    case 'recipes/coffee-bags':
-      return { tab: 'recipes', recipeLibraryView: 'coffee' }
     case 'recipes/brew-recipes':
       return { tab: 'recipes', recipeLibraryView: 'recipes' }
+    case 'beans':
+    case 'recipes/coffee-bags':
+      return { tab: 'beans', recipeLibraryView: 'coffee' }
     case 'history':
       return { tab: 'history', recipeLibraryView: fallbackRecipeView }
     case 'device':
       return { tab: 'device', recipeLibraryView: fallbackRecipeView }
     case 'brew':
+      return { tab: 'brew', recipeLibraryView: fallbackRecipeView }
     case '':
     default:
-      return { tab: 'brew', recipeLibraryView: fallbackRecipeView }
+      return { tab: 'history', recipeLibraryView: fallbackRecipeView }
   }
 }

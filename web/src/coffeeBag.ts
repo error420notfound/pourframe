@@ -37,6 +37,7 @@ export function createCoffeeBag(): CoffeeBag {
     processing: [],
     createdAt: now,
     updatedAt: now,
+    starred: false,
   }
 }
 
@@ -55,6 +56,7 @@ export function normalizeCoffeeBag(input: CoffeeBag): CoffeeBag {
     farm: trimmed(input.farm, 80),
     processing: input.processing.slice(0, 3).map((item) => trimmed(item, 40)).filter(Boolean),
     updatedAt: new Date().toISOString(),
+    starred: input.starred === true,
   }
 }
 

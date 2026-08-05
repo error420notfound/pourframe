@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrewRecipe, BrewRecord, CoffeeBag, Collection } from './brewTypes'
 import { defaultRecipes } from './defaultRecipes'
+import { defaultCoffeeBags } from './defaultCoffeeBags'
 import { buildSchedule, migrateRecipe } from './brew'
 import { normalizeCoffeeBag } from './coffeeBag'
 import { decodeTrace, type BrewTraceSample } from './trace'
@@ -235,6 +236,9 @@ export function useLibrary() {
       coffeeBagCollection = { ...coffeeBagCollection, items: coffeeBagCollection.items.map(normalizeCoffeeBag) }
       if (recipeCollection.items.length === 0) {
         for (const recipe of defaultRecipes) recipeCollection = await postRecipe(recipe, recipeCollection.revision)
+      }
+      if (coffeeBagCollection.items.length === 0) {
+        for (const coffeeBag of defaultCoffeeBags) coffeeBagCollection = await postCoffeeBag(coffeeBag, coffeeBagCollection.revision)
       }
       recipeRevision.current = recipeCollection.revision
       brewRevision.current = brewCollection.revision

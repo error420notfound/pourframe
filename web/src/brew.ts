@@ -3,6 +3,8 @@ import type { BrewRecipe, BrewStep } from './brewTypes'
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(Math.max(value, minimum), maximum)
 
 export const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+/** Shared by the physical/audio countdown and the focus-graph cue emphasis. */
+export const stepCueLeadSeconds = 5
 
 export function formatTime(seconds: number) {
   const safe = Math.max(0, Math.round(seconds))
@@ -28,6 +30,8 @@ export function migrateRecipe(recipe: BrewRecipe | (Omit<BrewRecipe, 'poursAfter
     ...legacy,
     poursAfterBloom: Number.isFinite(legacy.poursAfterBloom) ? legacy.poursAfterBloom : legacy.pours ?? 1,
     pours: undefined,
+    starred: legacy.starred === true,
+    serveStyle: legacy.serveStyle === 'iced' ? 'iced' : 'hot',
   }
 }
 
@@ -41,6 +45,7 @@ export function validateRecipe(input: BrewRecipe): RecipeValidation {
   if (!Number.isFinite(recipe.ratio) || recipe.ratio <= 0 || recipe.ratio > 30) errors.ratio = 'Ratio must be greater than 0 and no more than 30.'
   if (!Number.isFinite(recipe.bloom) || recipe.bloom <= 0 || recipe.bloom >= recipe.water) errors.bloom = 'Bloom must be greater than 0 g and less than total water.'
   if (!Number.isInteger(recipe.poursAfterBloom) || recipe.poursAfterBloom < 1 || recipe.poursAfterBloom > 6) errors.poursAfterBloom = 'Pours after bloom must be a whole number from 1 to 6.'
+  if (recipe.serveStyle !== 'hot' && recipe.serveStyle !== 'iced') errors.poursAfterBloom = 'Choose Hot or Iced serving style.'
   return { valid: Object.keys(errors).length === 0, errors }
 }
 
