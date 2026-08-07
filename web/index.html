@@ -2,12 +2,149 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#ffffff" />
-    <meta name="description" content="Pourframe dual-scale coffee weighing controller" />
-    <title>Pourframe</title>
+    <meta name="description" content="Local-first guided coffee brewing with live PourFrame scale telemetry." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="PourFrame" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="PourFrame" />
+    <meta property="og:description" content="Local-first guided coffee brewing with live PourFrame scale telemetry." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="PourFrame" />
+    <meta name="twitter:description" content="Local-first guided coffee brewing with live PourFrame scale telemetry." />
+    <link rel="icon" href="./favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>PourFrame</title>
+    <style>
+      :root {
+        background: #f7f7f5;
+      }
+
+      :root[data-splash-theme='dark'] {
+        background: #101110;
+        color-scheme: dark;
+      }
+
+      body {
+        background: #f7f7f5;
+      }
+
+      :root[data-splash-theme='dark'] body {
+        background: #101110;
+      }
+
+      #app-splash {
+        position: fixed;
+        z-index: 9999;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #f7f7f5;
+        color: #111111;
+        transition: opacity 180ms ease, visibility 180ms ease;
+      }
+
+      :root[data-splash-theme='dark'] #app-splash {
+        background: #101110;
+        color: #f6f7f4;
+      }
+
+      #app-splash.app-splash--hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .app-splash__content {
+        display: grid;
+        justify-items: center;
+        gap: 18px;
+        padding: 24px;
+      }
+
+      .app-splash__icon {
+        width: min(38vw, 168px);
+        height: min(38vw, 168px);
+        object-fit: cover;
+        border-radius: 28px;
+        box-shadow: 0 18px 48px rgb(17 17 17 / 10%);
+      }
+
+      .app-splash__name {
+        margin: 0;
+        font: 700 0.82rem/1 Geist, ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .app-splash__loading {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #6c6c67;
+        font: 500 0.72rem/1 Geist, ui-sans-serif, system-ui, sans-serif;
+      }
+
+      :root[data-splash-theme='dark'] .app-splash__loading {
+        color: #a4a69f;
+      }
+
+      .app-splash__dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #d88b00;
+        animation: app-splash-pulse 900ms ease-in-out infinite;
+      }
+
+      .app-splash__dot:nth-child(2) { animation-delay: 120ms; }
+      .app-splash__dot:nth-child(3) { animation-delay: 240ms; }
+
+      @keyframes app-splash-pulse {
+        0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+        30% { opacity: 1; transform: translateY(-2px); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #app-splash { transition: none; }
+        .app-splash__dot { animation: none; opacity: 0.7; }
+      }
+    </style>
+    <script>
+      (() => {
+        let preference = '';
+        let legacyTheme = '';
+        try {
+          preference = localStorage.getItem('pourframe.theme.preference.v1') || '';
+          legacyTheme = localStorage.getItem('pourframe.theme') || '';
+        } catch {
+          // Fall back to the system preference when storage is unavailable.
+        }
+        const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+        const dark = preference === 'dark' || (preference !== 'light' && legacyTheme === 'dark') || (preference !== 'light' && legacyTheme !== 'dark' && systemDark);
+        document.documentElement.dataset.splashTheme = dark ? 'dark' : 'light';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101110' : '#f7f7f5');
+      })();
+    </script>
   </head>
   <body>
+    <div id="app-splash" role="status" aria-live="polite">
+      <div class="app-splash__content">
+        <img class="app-splash__icon" src="./assets/pourover-icon-master.png" alt="" />
+        <p class="app-splash__name">PourFrame</p>
+        <div class="app-splash__loading" aria-label="Loading PourFrame">
+          <span>Loading</span>
+          <span class="app-splash__dot"></span>
+          <span class="app-splash__dot"></span>
+          <span class="app-splash__dot"></span>
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

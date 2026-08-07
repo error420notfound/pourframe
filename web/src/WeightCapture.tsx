@@ -3,6 +3,7 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { captureFilename, captureToCsv, MAX_CAPTURE_SAMPLES, telemetryToCaptureSample, type CaptureSample } from './capture'
 import type { DeviceTelemetry } from './types'
+import { cssColor, withAlpha } from './chartTheme'
 
 interface WeightCaptureProps {
   telemetry: DeviceTelemetry | null
@@ -11,6 +12,7 @@ interface WeightCaptureProps {
 
 type CapturePhase = 'idle' | 'recording' | 'stopped'
 type CaptureColumns = [number[], Array<number | null>, Array<number | null>, Array<number | null>]
+const smoothPath = uPlot.paths.spline?.({ alignGaps: 0 })
 
 interface CaptureProgress {
   elapsedSeconds: number
@@ -27,11 +29,6 @@ function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60)
   const remaining = seconds - minutes * 60
   return `${minutes.toString().padStart(2, '0')}:${remaining.toFixed(1).padStart(4, '0')}`
-}
-
-function cssColor(name: string, fallback: string) {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return value || fallback
 }
 
 function plotOptions(width: number, height: number): uPlot.Options {
@@ -53,9 +50,9 @@ function plotOptions(width: number, height: number): uPlot.Options {
         label: 'Time',
         value: (_plot, raw) => raw == null ? '—' : `${raw.toFixed(3)} s`,
       },
-      { label: 'Total', stroke: totalColor, width: 2.5, spanGaps: false, points: { show: false }, value },
-      { label: 'Upper', stroke: upperColor, width: 1.7, dash: [9, 5], spanGaps: false, points: { show: false }, value },
-      { label: 'Lower', stroke: lowerColor, width: 1.7, dash: [2, 5], spanGaps: false, points: { show: false }, value },
+      { label: 'Total', paths: smoothPath, stroke: withAlpha(totalColor, 0.92), fill: withAlpha(totalColor, 0.12), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 2.3, spanGaps: false, points: { show: false }, value },
+      { label: 'Upper', paths: smoothPath, stroke: withAlpha(upperColor, 0.88), fill: withAlpha(upperColor, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 1.8, spanGaps: false, points: { show: false }, value },
+      { label: 'Lower', paths: smoothPath, stroke: withAlpha(lowerColor, 0.88), fill: withAlpha(lowerColor, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 1.8, spanGaps: false, points: { show: false }, value },
     ],
     axes: [
       {

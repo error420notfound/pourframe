@@ -6,10 +6,12 @@
 namespace measurement {
 namespace config {
 
-constexpr uint32_t kRevision = 2;
+constexpr uint32_t kRevision = 3;
 constexpr float kNominalSampleRateHz = 10.0f;
 constexpr uint64_t kNominalPeriodUs = 100000;
-constexpr uint32_t kPublicationIntervalMs = 100;
+// HX711 acquisition remains hardware-paced; this limits only publication of
+// the latest already-processed snapshot to the web app.
+constexpr uint32_t kPublicationIntervalMs = 500;
 constexpr size_t kMedianWindow = 3;
 constexpr size_t kHistoryCapacity = 96;
 constexpr uint64_t kSlopeWindowUs = 320000;

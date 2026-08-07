@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { buildSchedule, createId, normalizeRecipe, validateRecipe } from './brew'
-import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, stablePairedTelemetry, type BrewMachineEvent } from './brewMachine'
+import { buildSchedule, createId, formatRecipeWeight, normalizeRecipe, stepCueLeadSeconds, validateRecipe } from './brew'
+import { snapshotCoffeeBag } from './coffeeBag'
+import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, type BrewMachineEvent } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
-import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus, StepTransition } from './brewTypes'
+import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus, CoffeeBag, StepTransition } from './brewTypes'
 import { playCue } from './audio'
 import { BrewTraceBuffer, encodeTrace, traceSample } from './trace'
 import type { DeviceCommandPayload, DeviceTelemetry, ProtocolAck } from './types'
@@ -11,7 +12,7 @@ import { usableScale } from './useDevice'
 
 type LegacySender = (command: 'tare' | 'set_target', channel: 'upper' | 'lower' | 'total', grams?: number) => Promise<ProtocolAck>
 type ProtocolSender = (payload: DeviceCommandPayload) => Promise<ProtocolAck>
-type SaveBrew = (record: BrewRecord, trace?: Uint8Array) => Promise<void>
+type SaveBrew = (record: BrewRecord, trace?: Uint8Array, coffeeBagId?: string, doseG?: number) => Promise<string | undefined>
 type PhysicalCueState = 'ready' | 'active' | 'completed' | 'cancelled' | 'unavailable' | 'health_aborted'
 const acknowledgedCommandsKey = 'pourframe.brew.acknowledged.v1'
 
@@ -22,13 +23,14 @@ function loadAcknowledgedCommands() {
   } catch { return new Set<string>() }
 }
 
-export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | null, connection: ConnectionState, sendCommand: LegacySender, sendProtocolCommand: ProtocolSender, saveBrew: SaveBrew, sound: boolean) {
+export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, telemetry: DeviceTelemetry | null, connection: ConnectionState, sendCommand: LegacySender, sendProtocolCommand: ProtocolSender, saveBrew: SaveBrew) {
   const schedule = useMemo(() => buildSchedule(recipe), [recipe])
   const [machine, setMachine] = useState(initialBrewMachine)
   const machineRef = useRef(machine)
   const [elapsedMs, setElapsedMs] = useState(0)
-  const [prepStage, setPrepStage] = useState<'confirm' | 'working' | 'timer' | null>(null)
+  const [prepStage, setPrepStage] = useState<'confirm' | 'working' | 'ready' | 'timer' | null>(null)
   const [message, setMessage] = useState('')
+  const [deviceBlocked, setDeviceBlocked] = useState(false)
   const [physicalCue, setPhysicalCue] = useState<PhysicalCueState>('ready')
   const physicalCueRef = useRef(physicalCue)
   const telemetryRef = useRef(telemetry)
@@ -43,6 +45,7 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
   const summary = useRef(newSensorSummary('device'))
   const lastTelemetrySequence = useRef<number | null>(null)
   const saved = useRef(false)
+  const brewCoffeeBag = useRef<CoffeeBag | null>(null)
   const acknowledgedCommands = useRef<Set<string> | null>(null)
   if (acknowledgedCommands.current == null) acknowledgedCommands.current = loadAcknowledgedCommands()
   telemetryRef.current = telemetry
@@ -88,21 +91,21 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
       const transition: StepTransition = { transition_id: transitionId, step_id: step.id, scheduled_elapsed_ms: Math.round(step.start * 1000), actual_elapsed_ms: actualElapsed, actual_timestamp: new Date().toISOString(), outcome: 'missed', cue: physicalCueRef.current === 'completed' ? 'completed' : 'unavailable', reduced_confidence: true }
       event({ type: 'ACTIVATE_TIMER', stepIndex: index, transition })
       if (index === 0) { clockStartedAt.current = performance.now(); pausedTotal.current = 0; setElapsedMs(0) }
-      playCue(index === 0 ? 'start' : 'pour', sound)
+      playCue(index === 0 ? 'start' : 'pour')
       return
     }
     const currentTelemetry = telemetryRef.current
-    if (!currentTelemetry) { pendingStep.current = { index, transitionId, source }; event({ type: 'WAIT_FOR_BASELINE' }); return }
+    if (!currentTelemetry) { pendingStep.current = { index, transitionId, source }; event({ type: 'WAIT_FOR_BASELINE' }); setMessage('Live scale data is unavailable.'); return }
     const captured = captureBaseline(currentTelemetry, step, index, actualElapsed, transitionId, source)
-    if (!captured) { pendingStep.current = { index, transitionId, source }; event({ type: 'WAIT_FOR_BASELINE' }); setMessage('Waiting for a stable scale.'); return }
+    if (!captured) { pendingStep.current = { index, transitionId, source }; event({ type: 'WAIT_FOR_BASELINE' }); setMessage('Live scale data is unavailable or unsynchronized.'); return }
     captured.transition.cue = physicalCueRef.current === 'completed' ? 'completed' : physicalCueRef.current === 'health_aborted' ? 'health_aborted' : 'unavailable'
     event({ type: 'ACTIVATE', ...captured })
     pendingStep.current = null
-    setMessage('Stable step baseline captured.')
+    setMessage(index === 0 ? 'Brew started.' : `${step.name} started.`)
     if (index === 0) { clockStartedAt.current = performance.now(); pausedTotal.current = 0; setElapsedMs(0) }
     void sendOnce(`step:${transitionId}`, { command: 'brew_step_activate', transition_id: transitionId, baseline_total_grams: captured.baseline.total_g, step_target_grams: step.pour, cumulative_target_grams: step.cumulative }).catch((error: unknown) => setMessage(error instanceof Error ? error.message : 'Physical step target unavailable'))
-    playCue(index === 0 ? 'start' : 'pour', sound)
-  }, [elapsedNow, event, schedule, sendOnce, sound])
+    playCue(index === 0 ? 'start' : 'pour')
+  }, [elapsedNow, event, schedule, sendOnce])
 
   const beginCountdown = useCallback((index: number, generation = machineRef.current.countdownGeneration) => {
     const step = schedule[index]
@@ -116,9 +119,9 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
       void sendOnce(`cue:${cueId}`, { command: 'brew_step_cue', cue_id: cueId, pulse_count: 5, interval_ms: 1000 })
         .catch((error: unknown) => { updatePhysicalCue('unavailable'); setMessage(error instanceof Error ? error.message : 'Physical cue unavailable') })
     }
-    for (let pulse = 0; pulse < 5; pulse += 1) countdownTimers.current.push(window.setTimeout(() => playCue('tick', sound), pulse * 1000))
+    for (let pulse = 0; pulse < 5; pulse += 1) countdownTimers.current.push(window.setTimeout(() => playCue('tick'), pulse * 1000))
     countdownTimers.current.push(window.setTimeout(() => { if (physicalCueRef.current === 'active') updatePhysicalCue('completed'); activate(index, transitionId, 'automatic') }, 5000))
-  }, [activate, clearCountdown, connection, event, schedule, sendOnce, sound, updatePhysicalCue])
+  }, [activate, clearCountdown, connection, event, schedule, sendOnce, updatePhysicalCue])
 
   useEffect(() => {
     if (machine.phase === 'IDLE' || machine.phase === 'PREPARING' || machine.phase === 'READY' || machine.phase === 'PAUSED' || machine.phase === 'COMPLETE' || machine.phase === 'ERROR') return
@@ -135,7 +138,7 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
       if (elapsedMs >= next.start * 1000) event({ type: 'DRAWDOWN' })
       return
     }
-    if (elapsedMs >= Math.max(0, next.start * 1000 - 5000)) beginCountdown(nextIndex)
+    if (elapsedMs >= Math.max(0, next.start * 1000 - stepCueLeadSeconds * 1000)) beginCountdown(nextIndex)
   }, [beginCountdown, elapsedMs, event, machine.currentStepIndex, machine.phase, schedule])
 
   useEffect(() => {
@@ -149,7 +152,7 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
   }, [event, machine.baselines, machine.currentStepIndex, machine.mode, machine.phase, schedule, telemetry])
 
   useEffect(() => {
-    if (machine.phase !== 'WAITING_FOR_STABLE_BASELINE' || !pendingStep.current || !telemetry || !stablePairedTelemetry(telemetry)) return
+    if (machine.phase !== 'WAITING_FOR_STABLE_BASELINE' || !pendingStep.current || !telemetry || !completePairedTelemetry(telemetry)) return
     const pending = pendingStep.current
     activate(pending.index, pending.transitionId, pending.source)
   }, [activate, machine.phase, telemetry])
@@ -167,9 +170,34 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
     if (state === 'active' || state === 'completed' || state === 'cancelled' || state === 'health_aborted' || state === 'unavailable') updatePhysicalCue(state)
   }, [telemetry?.led?.cue_state, updatePhysicalCue])
 
+  useEffect(() => {
+    if (machine.mode !== 'device') return
+    const liveAuthority = connection === 'online' && liveScaleTelemetry(telemetry)
+    const activePhase = machine.phase === 'POUR_ACTIVE' || machine.phase === 'STEP_COUNTDOWN' ||
+      machine.phase === 'WAITING_FOR_STABLE_BASELINE' || machine.phase === 'DRAWDOWN'
+    if (!liveAuthority && activePhase && !deviceBlocked) {
+      if (machine.phase === 'STEP_COUNTDOWN' || machine.phase === 'WAITING_FOR_STABLE_BASELINE') {
+        pausedStep.current = pendingStep.current?.index ?? Math.max(0, machine.currentStepIndex + 1)
+      }
+      const cueId = machine.activeCueId
+      if (cueId) void sendOnce(`cancel:${cueId}`, { command: 'brew_step_cue_cancel', cue_id: cueId }).catch(() => undefined)
+      clearCountdown()
+      pausedAt.current = performance.now()
+      updatePhysicalCue('unavailable')
+      setDeviceBlocked(true)
+      setMessage('PourFrame device offline. The scale-controlled brew is paused; reconnect or continue timer-only.')
+      event({ type: 'PAUSE' })
+      return
+    }
+    if (liveAuthority && deviceBlocked && machine.phase === 'PAUSED') {
+      setMessage('PourFrame reconnected with valid paired telemetry. Resume when you are ready.')
+    }
+  }, [clearCountdown, connection, deviceBlocked, event, machine.activeCueId, machine.currentStepIndex, machine.mode, machine.phase, sendOnce, telemetry, updatePhysicalCue])
+
   const prepare = useCallback(async () => {
     const validation = validateRecipe(recipe)
     if (!validation.valid) { setMessage(Object.values(validation.errors)[0] ?? 'Recipe is invalid.'); setPrepStage('confirm'); return }
+    brewCoffeeBag.current = coffeeBag ? { ...coffeeBag, tastingNotes: [...coffeeBag.tastingNotes], processing: [...coffeeBag.processing] } : null
     trace.current!.clear()
     const validationId = createId('brew')
     event({ type: 'PREPARE', brewId: validationId })
@@ -177,36 +205,69 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
     const result = await prepareDevice(connection, telemetry, recipe.water, sendCommand)
     setMessage(result.message)
     if (result.kind === 'timer') { event({ type: 'ERROR', message: result.message }); setPrepStage('timer'); return }
-    event({ type: 'PREPARED', mode: 'device' }); setPrepStage(null); saved.current = false; summary.current = newSensorSummary('device'); lastTelemetrySequence.current = null
-    beginCountdown(0)
-  }, [beginCountdown, connection, event, recipe, sendCommand, telemetry])
+    event({ type: 'PREPARED', mode: 'device' }); setPrepStage('ready'); setMessage('PourFrame is ready. Start when you are ready to pour.'); saved.current = false; summary.current = newSensorSummary('device'); lastTelemetrySequence.current = null
+  }, [coffeeBag, connection, event, recipe, sendCommand, telemetry])
+
+  const startPrepared = useCallback(() => {
+    if (machineRef.current.phase !== 'READY') return
+    const currentTelemetry = telemetryRef.current
+    if (!currentTelemetry || !completePairedTelemetry(currentTelemetry)) {
+      setMessage('Live scale data is unavailable or unsynchronized. You can start in timer-only mode instead.')
+      setPrepStage('timer')
+      return
+    }
+    setPrepStage(null)
+    const step = schedule[0]
+    if (!step || step.kind !== 'pour') return
+    activate(0, `${machineRef.current.brewId}:${step.id}`, 'automatic')
+  }, [activate, schedule])
 
   const startTimerOnly = useCallback(() => {
+    if (brewCoffeeBag.current == null && coffeeBag) brewCoffeeBag.current = { ...coffeeBag, tastingNotes: [...coffeeBag.tastingNotes], processing: [...coffeeBag.processing] }
     const brewId = machineRef.current.brewId || createId('brew')
     if (machineRef.current.phase !== 'PREPARING' && machineRef.current.phase !== 'ERROR') event({ type: 'PREPARE', brewId })
     if (machineRef.current.phase === 'ERROR') { machineRef.current = { ...initialBrewMachine(), phase: 'PREPARING', brewId }; setMachine(machineRef.current) }
-    event({ type: 'PREPARED', mode: 'timer_only' }); setPrepStage(null); setMessage('Timer-only brew started. Scale readings will not be recorded.'); saved.current = false; trace.current!.clear(); summary.current = newSensorSummary('timer_only')
-    beginCountdown(0)
-  }, [beginCountdown, event])
+    event({ type: 'PREPARED', mode: 'timer_only' }); setDeviceBlocked(false); setPrepStage(null); setMessage('Timer-only brew started. Scale readings will not be recorded.'); saved.current = false; trace.current!.clear(); summary.current = newSensorSummary('timer_only')
+    const step = schedule[0]
+    if (step?.kind === 'pour') activate(0, `${machineRef.current.brewId}:${step.id}`, 'automatic')
+  }, [activate, coffeeBag, event, schedule])
 
   const continueTimerOnly = useCallback(() => {
     const pending = pendingStep.current
-    if (machineRef.current.phase !== 'WAITING_FOR_STABLE_BASELINE' || !pending) return
+    const continuingBlockedBrew = deviceBlocked && machineRef.current.phase === 'PAUSED'
+    if (!continuingBlockedBrew && (machineRef.current.phase !== 'WAITING_FOR_STABLE_BASELINE' || !pending)) return
     machineRef.current = { ...machineRef.current, mode: 'timer_only', reducedConfidence: true }
     setMachine(machineRef.current)
     summary.current = { ...summary.current, mode: 'timer_only' }
-    setMessage('Continuing timer-only. This transition is recorded as missed with reduced confidence.')
-    activate(pending.index, pending.transitionId, pending.source)
-    pendingStep.current = null
-  }, [activate])
-
-  const pauseResume = useCallback(() => {
-    if (machineRef.current.phase === 'PAUSED') {
+    setDeviceBlocked(false)
+    setMessage('Continuing timer-only with reduced confidence. Live scale readings will not be recorded.')
+    if (continuingBlockedBrew) {
       if (pausedAt.current != null) pausedTotal.current += performance.now() - pausedAt.current
       pausedAt.current = null
       const restart = pausedStep.current
       event({ type: 'RESUME' })
       if (restart != null) { pausedStep.current = null; beginCountdown(restart, machineRef.current.countdownGeneration) }
+      return
+    }
+    activate(pending!.index, pending!.transitionId, pending!.source)
+    pendingStep.current = null
+  }, [activate, beginCountdown, deviceBlocked, event])
+
+  const pauseResume = useCallback(() => {
+    if (machineRef.current.phase === 'PAUSED') {
+      if (deviceBlocked && machineRef.current.mode === 'device' &&
+          (connection !== 'online' || !completePairedTelemetry(telemetryRef.current))) {
+        setMessage('Waiting for valid paired telemetry. Reconnect PourFrame or continue timer-only.')
+        return
+      }
+      if (pausedAt.current != null) pausedTotal.current += performance.now() - pausedAt.current
+      pausedAt.current = null
+      const resumedAfterDeviceLoss = deviceBlocked
+      setDeviceBlocked(false)
+      const restart = pausedStep.current
+      event({ type: 'RESUME' })
+      if (restart != null) { pausedStep.current = null; beginCountdown(restart, machineRef.current.countdownGeneration) }
+      if (resumedAfterDeviceLoss) setMessage('Brew resumed with valid live telemetry.')
       return
     }
     if (machineRef.current.phase === 'STEP_COUNTDOWN' || machineRef.current.phase === 'WAITING_FOR_STABLE_BASELINE') {
@@ -216,25 +277,29 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
       updatePhysicalCue('cancelled')
     }
     clearCountdown(); pausedAt.current = performance.now(); event({ type: 'PAUSE' })
-  }, [beginCountdown, clearCountdown, event, sendOnce, updatePhysicalCue])
+  }, [beginCountdown, clearCountdown, connection, deviceBlocked, event, sendOnce, updatePhysicalCue])
 
   const reset = useCallback(() => {
     const cueId = machineRef.current.activeCueId
     if (cueId) void sendOnce(`cancel:${cueId}`, { command: 'brew_step_cue_cancel', cue_id: cueId }).catch(() => undefined)
     void sendProtocolCommand({ command: 'brew_step_clear' }).catch(() => undefined)
-    clearCountdown(); clockStartedAt.current = null; pausedAt.current = null; pausedTotal.current = 0; pendingStep.current = null; trace.current!.clear(); summary.current = newSensorSummary('device'); setElapsedMs(0); setPrepStage(null); setMessage(''); updatePhysicalCue('ready'); event({ type: 'RESET' })
+    clearCountdown(); clockStartedAt.current = null; pausedAt.current = null; pausedTotal.current = 0; pausedStep.current = null; pendingStep.current = null; brewCoffeeBag.current = null; trace.current!.clear(); summary.current = newSensorSummary('device'); setDeviceBlocked(false); setElapsedMs(0); setPrepStage(null); setMessage(''); updatePhysicalCue('ready'); event({ type: 'RESET' })
   }, [clearCountdown, event, sendOnce, sendProtocolCommand, updatePhysicalCue])
 
   const finish = useCallback(async () => {
     if (saved.current) return
-    saved.current = true; clearCountdown(); event({ type: 'COMPLETE' }); playCue('complete', sound)
+    saved.current = true; clearCountdown(); event({ type: 'COMPLETE' }); playCue('complete')
     void sendProtocolCommand({ command: 'brew_step_clear' }).catch(() => undefined)
     const encoded = machineRef.current.mode === 'device' ? encodeTrace(trace.current!.samples()) : null
     const recordDeviceData = machineRef.current.mode === 'device'
     const finalLower = recordDeviceData && usableScale(telemetry?.scales.lower) ? telemetry!.scales.lower.grams : null
-    const record: BrewRecord = { id: machineRef.current.brewId, completed_at: new Date().toISOString(), elapsed_s: elapsedNow() / 1000, recipe: normalizeRecipe(recipe), schedule, baselines: machineRef.current.baselines, transitions: machineRef.current.transitions, final: { upper_g: recordDeviceData && usableScale(telemetry?.scales.upper) ? telemetry!.scales.upper.grams : null, lower_g: finalLower, total_g: recordDeviceData && telemetry?.total.available && !telemetry.total.partial && Number.isFinite(telemetry.total.grams) ? telemetry.total.grams : null, beverage_g: finalLower }, sensor_summary: summary.current, trace: encoded?.metadata ?? null }
-    try { await saveBrew(record, encoded?.bytes); setMessage('Brew saved on PourFrame.') } catch (error) { setMessage(error instanceof Error ? error.message : 'Brew saved to the local retry outbox') }
-  }, [clearCountdown, elapsedNow, event, recipe, saveBrew, schedule, sendProtocolCommand, sound, telemetry])
+    const selectedBag = brewCoffeeBag.current
+    const record: BrewRecord = { id: machineRef.current.brewId, completed_at: new Date().toISOString(), elapsed_s: elapsedNow() / 1000, recipe: normalizeRecipe(recipe), schedule, baselines: machineRef.current.baselines, transitions: machineRef.current.transitions, final: { upper_g: recordDeviceData && usableScale(telemetry?.scales.upper) ? telemetry!.scales.upper.grams : null, lower_g: finalLower, total_g: recordDeviceData && telemetry?.total.available && !telemetry.total.partial && Number.isFinite(telemetry.total.grams) ? telemetry.total.grams : null, beverage_g: finalLower }, sensor_summary: summary.current, trace: encoded?.metadata ?? null, coffee_bag: selectedBag ? snapshotCoffeeBag(selectedBag) : null, coffee_used_g: selectedBag ? recipe.coffee : null }
+    try {
+      const inventoryWarning = await saveBrew(record, encoded?.bytes, selectedBag?.id, selectedBag ? recipe.coffee : undefined)
+      setMessage(inventoryWarning === 'coffee_bag_not_found' ? 'Brew saved. The selected coffee bag was deleted before inventory could be updated.' : selectedBag ? `Brew saved and ${formatRecipeWeight(recipe.coffee)} g deducted from ${selectedBag.name}.` : 'Brew saved on PourFrame.')
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Brew saved to the local retry outbox') }
+  }, [clearCountdown, elapsedNow, event, recipe, saveBrew, schedule, sendProtocolCommand, telemetry])
 
   useEffect(() => { if (machine.phase === 'DRAWDOWN' && elapsedMs >= recipe.brewTime * 1000) void finish() }, [elapsedMs, finish, machine.phase, recipe.brewTime])
   useEffect(() => () => clearCountdown(), [clearCountdown])
@@ -245,11 +310,11 @@ export function useGuidedBrew(recipe: BrewRecipe, telemetry: DeviceTelemetry | n
     if (!step || step.kind !== 'pour') return
     const transitionId = `${machineRef.current.brewId}:${step.id}`
     pendingStep.current = { index, transitionId, source: 'manual' }
-    if (telemetry && stablePairedTelemetry(telemetry)) activate(index, transitionId, 'manual')
-    else setMessage('Manual advance armed. Waiting for the next stable paired reading, or switch to timer-only mode.')
+    if (telemetry && completePairedTelemetry(telemetry)) activate(index, transitionId, 'manual')
+    else setMessage('Manual advance armed. Waiting for a synchronized paired reading, or switch to timer-only mode.')
   }, [activate, schedule, telemetry])
 
   const status: BrewStatus = machine.phase === 'IDLE' || machine.phase === 'ERROR' ? 'idle' : machine.phase === 'PREPARING' || machine.phase === 'READY' ? 'preparing' : machine.phase === 'PAUSED' ? 'paused' : machine.phase === 'COMPLETE' ? 'complete' : 'brewing'
   const baseline = machine.baselines[machine.baselines.length - 1]
-  return { machine, status, elapsed: elapsedMs / 1000, schedule, traceBuffer: trace.current, prepStage, setPrepStage, message, physicalCue, relative: relativeReadings(telemetry, baseline), prepare, startTimerOnly, continueTimerOnly, pauseResume, reset, finish, manualAdvance }
+  return { machine, status, elapsed: elapsedMs / 1000, schedule, traceBuffer: trace.current, prepStage, setPrepStage, message, physicalCue, deviceBlocked, relative: relativeReadings(telemetry, baseline), prepare, startPrepared, startTimerOnly, continueTimerOnly, pauseResume, reset, finish, manualAdvance }
 }

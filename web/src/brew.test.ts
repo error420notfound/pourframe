@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildSchedule, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
-import { captureBaseline, completePairedTelemetry, initialBrewMachine, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
+import { deriveActiveBrewSummary } from './brewSummaryModel'
+import { buildSchedule, expectedRecipeYield, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
+import { createCoffeeBag, filterCoffeeBags, normalizeCoffeeBag, snapshotCoffeeBag, sortCoffeeBags, validateCoffeeBag } from './coffeeBag'
+import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
 import { tareBothScales } from './brewSession'
-import { brewMilestones, traceColumns } from './BrewGraph'
+import { brewMilestones, columnsWithinTimeDomain, hasPlottableValues, milestoneIsImminent, scheduledBrewMilestones, traceColumns, weightDomainForTarget } from './BrewGraph'
 import { defaultRecipes } from './defaultRecipes'
+import { defaultCoffeeBags } from './defaultCoffeeBags'
 import { LibraryApiError, loadBrewTrace, parseLegacyBrews, parseLegacyRecipes, retainNewestBrews, retryOnConflict } from './library'
 import { BrewTraceBuffer, decodeTrace, encodeTrace, traceSample } from './trace'
 import type { DeviceTelemetry, ProtocolAck } from './types'
@@ -17,6 +20,83 @@ function telemetry(partial = false, stable = true): DeviceTelemetry {
 }
 
 const ack = (id: string): ProtocolAck => ({ v: 1, type: 'ack', id, ok: true, message: 'ok' })
+
+describe('active brew summary model', () => {
+  it('uses synchronized cumulative water and elapsed recipe progress', () => {
+    const recipe = { ...defaultRecipes[0], brewTime: 180, water: 320 }
+    const schedule = buildSchedule(recipe)
+    const sample = telemetry()
+    sample.total.grams = 125.4
+    const model = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'brewing',
+      elapsed: 90,
+      mode: 'device',
+      telemetry: sample,
+      machine: { ...initialBrewMachine(), phase: 'POUR_ACTIVE', currentStepIndex: 1 },
+    })
+
+    expect(model.progress).toBe(.5)
+    expect(model.progressPercent).toBe(50)
+    expect(model.step.id).toBe('pour-1')
+    expect(model.next?.id).toBe('pour-2')
+    expect(model.totalWater).toBe(125.4)
+    expect(model.remainingWater).toBeCloseTo(194.6)
+    expect(model.weightState).toBe('available')
+  })
+
+  it('never exports a partial or timer-only value as total water', () => {
+    const recipe = defaultRecipes[0]
+    const schedule = buildSchedule(recipe)
+    const partial = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'paused',
+      elapsed: 45,
+      mode: 'device',
+      telemetry: telemetry(true),
+      machine: { ...initialBrewMachine(), phase: 'PAUSED', currentStepIndex: 0 },
+    })
+    const timerOnly = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'brewing',
+      elapsed: 45,
+      mode: 'timer_only',
+      telemetry: telemetry(),
+      machine: { ...initialBrewMachine(), phase: 'POUR_ACTIVE', mode: 'timer_only', currentStepIndex: 0 },
+    })
+
+    expect(partial.totalWater).toBeNull()
+    expect(partial.remainingWater).toBeNull()
+    expect(partial.weightState).toBe('unavailable')
+    expect(timerOnly.totalWater).toBeNull()
+    expect(timerOnly.weightState).toBe('timer_only')
+  })
+
+  it('clamps completion progress and reports honest over-target water', () => {
+    const recipe = defaultRecipes[0]
+    const schedule = buildSchedule(recipe)
+    const sample = telemetry()
+    sample.total.grams = recipe.water + 3.2
+    const model = deriveActiveBrewSummary({
+      recipe,
+      schedule,
+      status: 'complete',
+      elapsed: recipe.brewTime + 15,
+      mode: 'device',
+      telemetry: sample,
+      machine: { ...initialBrewMachine(), phase: 'COMPLETE', currentStepIndex: schedule.length - 1 },
+    })
+
+    expect(model.progress).toBe(1)
+    expect(model.progressPercent).toBe(100)
+    expect(model.step.kind).toBe('drawdown')
+    expect(model.next).toBeNull()
+    expect(model.remainingWater).toBeCloseTo(-3.2)
+  })
+})
 
 describe('recipe semantics', () => {
   it('uses four pours after bloom for the 20 g 1:16 example', () => {
@@ -46,9 +126,64 @@ describe('recipe semantics', () => {
   })
 
   it('migrates legacy pours literally and validates bloom', () => {
-    const legacy = { ...defaultRecipes[0], poursAfterBloom: undefined, pours: 4 } as unknown as typeof defaultRecipes[number]
-    expect(migrateRecipe(legacy).poursAfterBloom).toBe(4)
+    const { starred: _starred, serveStyle: _serveStyle, ...legacyRecipe } = defaultRecipes[0]
+    const legacy = { ...legacyRecipe, poursAfterBloom: undefined, pours: 4 } as unknown as typeof defaultRecipes[number]
+    const migrated = migrateRecipe(legacy)
+    expect(migrated.poursAfterBloom).toBe(4)
+    expect(migrated.starred).toBe(false)
+    expect(migrated.serveStyle).toBe('hot')
     expect(validateRecipe({ ...defaultRecipes[0], bloom: 320 }).errors.bloom).toBeTruthy()
+  })
+
+  it('calculates expected yield from the precise coffee and ratio values', () => {
+    const recipe = updateRecipeNumber({ ...defaultRecipes[0] }, 'coffee', 20.25)
+    expect(expectedRecipeYield(recipe)).toBe(20.25 * recipe.ratio)
+    expect(expectedRecipeYield(recipe)).toBe(recipe.water)
+  })
+})
+
+describe('coffee bag inventory', () => {
+  it('ships valid starter bags, including a starred depleted bag', () => {
+    expect(defaultCoffeeBags).toHaveLength(3)
+    expect(defaultCoffeeBags.every((bag) => validateCoffeeBag(bag).valid)).toBe(true)
+    expect(defaultCoffeeBags.some((bag) => bag.starred && bag.remainingWeightG === 0)).toBe(true)
+  })
+
+  it('validates required identity, weights, and conditional pre-ground size', () => {
+    const bag = { ...createCoffeeBag(), name: 'Ethiopia Buku', roastery: 'Local Roaster' }
+    expect(validateCoffeeBag(bag).valid).toBe(true)
+    expect(validateCoffeeBag({ ...bag, beanForm: 'Pre-ground', grind: undefined }).errors.grind).toBeTruthy()
+    expect(validateCoffeeBag({ ...bag, remainingWeightG: 251 }).errors.remainingWeightG).toBeTruthy()
+    expect(validateCoffeeBag({ ...bag, acidity: 5 }).errors.ratings).toBeTruthy()
+  })
+
+  it('normalizes bounded optional details and snapshots without mutable inventory', () => {
+    const bag = normalizeCoffeeBag({
+      ...createCoffeeBag(),
+      name: '  House roast  ',
+      roastery: '  PourFrame Coffee  ',
+      tastingNotes: ['Berry', 'Cocoa', 'Floral', 'Extra'],
+      processing: ['Washed', 'Fermented', 'Sun-dried', 'Extra'],
+    })
+    expect(bag.name).toBe('House roast')
+    expect(bag.tastingNotes).toEqual(['Berry', 'Cocoa', 'Floral'])
+    expect(bag.processing).toEqual(['Washed', 'Fermented', 'Sun-dried'])
+    expect(snapshotCoffeeBag(bag)).not.toHaveProperty('remainingWeightG')
+    expect(bag.starred).toBe(false)
+    const { starred: _starred, ...legacyBag } = bag
+    expect(normalizeCoffeeBag(legacyBag as typeof bag).starred).toBe(false)
+  })
+
+  it('keeps active bags first and supports filtering and stable sort choices', () => {
+    const base = { ...createCoffeeBag(), roastery: 'Roaster' }
+    const bags = [
+      { ...base, id: 'fresh', name: 'Fresh', roastedOn: '2026-07-20', remainingWeightG: 200 },
+      { ...base, id: 'old', name: 'Old', roastedOn: '2026-07-01', remainingWeightG: 80 },
+      { ...base, id: 'empty', name: 'Empty', roastedOn: '2026-06-01', remainingWeightG: 0 },
+    ]
+    expect(sortCoffeeBags(bags, 'roast-oldest').map((bag) => bag.id)).toEqual(['old', 'fresh', 'empty'])
+    expect(sortCoffeeBags(bags, 'remaining-high').map((bag) => bag.id)).toEqual(['fresh', 'old', 'empty'])
+    expect(filterCoffeeBags(bags, 'depleted').map((bag) => bag.id)).toEqual(['empty'])
   })
 })
 
@@ -61,20 +196,34 @@ describe('device preparation and virtual baselines', () => {
     expect(calls[2]).toBe('set_target:total')
   })
 
-  it('blocks partial or unstable preparation without sending a tare', async () => {
+  it('blocks partial preparation but keeps transiently active paired scales in device mode', async () => {
     const send = vi.fn(async (_command: string, channel: string) => ack(channel))
     await expect(prepareDevice('online', telemetry(true), 320, send)).resolves.toMatchObject({ kind: 'timer' })
-    await expect(prepareDevice('online', telemetry(false, false), 320, send)).resolves.toMatchObject({ kind: 'timer' })
     expect(send).not.toHaveBeenCalled()
+
+    await expect(prepareDevice('online', telemetry(false, false), 320, send)).resolves.toMatchObject({ kind: 'ready' })
+    expect(send).toHaveBeenCalledTimes(3)
   })
 
-  it('captures a baseline only from stable paired telemetry and computes relatives', () => {
+  it('captures a synchronized baseline without delaying for stability and computes relatives', () => {
     const step = buildSchedule(defaultRecipes[0])[0]
     const captured = captureBaseline(telemetry(), step, 0, 0, 'brew:bloom', 'automatic')
     expect(captured?.baseline.total_g).toBe(20)
+    expect(captured?.baseline.reduced_confidence).toBe(false)
+    const moving = captureBaseline(telemetry(false, false), step, 0, 0, 'moving', 'automatic')
+    expect(moving?.baseline.total_g).toBe(20)
+    expect(moving?.baseline.reduced_confidence).toBe(true)
     expect(captureBaseline(telemetry(true), step, 0, 0, 'bad', 'automatic')).toBeNull()
     const next = telemetry(); next.scales.upper.grams = 15; next.scales.lower.grams = 20; next.total.grams = 35
     expect(relativeReadings(next, captured?.baseline)).toEqual({ relativeUpper: 5, relativeLower: 10, stepWaterAdded: 15 })
+  })
+
+  it('separates live scale availability from pair synchronization quality', () => {
+    const transient = telemetry()
+    transient.measurement = { ...transient.measurement, pair_valid: false, pair_status: 'retained_peer' }
+    transient.total = { ...transient.total, partial: true }
+    expect(liveScaleTelemetry(transient)).toBe(true)
+    expect(completePairedTelemetry(transient)).toBe(false)
   })
 
   it('does not apply duplicate transitions twice', () => {
@@ -97,9 +246,27 @@ describe('device preparation and virtual baselines', () => {
     expect(state.countdownGeneration).toBe(3)
   })
 
+  it('returns an interrupted drawdown to drawdown after explicit resume', () => {
+    let state: BrewMachineState = { ...initialBrewMachine(), phase: 'DRAWDOWN', currentStepIndex: 2 }
+    state = reduceBrewMachine(state, { type: 'PAUSE' })
+    expect(state.phase).toBe('PAUSED')
+    expect(state.pausedFrom).toBe('DRAWDOWN')
+    state = reduceBrewMachine(state, { type: 'RESUME' })
+    expect(state.phase).toBe('DRAWDOWN')
+  })
+
   it('resets transient state without inventing another preparation', () => {
     const dirty: BrewMachineState = { ...initialBrewMachine(), phase: 'ERROR', brewId: 'brew-1', error: 'tare failed', activeCueId: 'cue-1' }
     expect(reduceBrewMachine(dirty, { type: 'RESET' })).toEqual(initialBrewMachine())
+  })
+
+  it('can switch a prepared brew to timer-only when synchronized telemetry disappears before start', () => {
+    const ready: BrewMachineState = { ...initialBrewMachine(), phase: 'READY', mode: 'device', brewId: 'brew-1' }
+    expect(reduceBrewMachine(ready, { type: 'PREPARED', mode: 'timer_only' })).toMatchObject({
+      phase: 'READY',
+      mode: 'timer_only',
+      brewId: 'brew-1',
+    })
   })
 
   it('records an explicit timer-only transition as reduced confidence', () => {
@@ -111,7 +278,7 @@ describe('device preparation and virtual baselines', () => {
   })
 })
 
-describe('10 Hz trace format', () => {
+describe('2 Hz published trace format', () => {
   it('round-trips absolute, relative, health, and rate fields', () => {
     const sample = telemetry()
     const baseline = captureBaseline(sample, buildSchedule(defaultRecipes[0])[0], 0, 0, 'id', 'automatic')!.baseline
@@ -122,18 +289,28 @@ describe('10 Hz trace format', () => {
     expect(decoded.stepWaterAdded).toBe(7)
     expect(decoded.pourRate).toBe(4.5)
     expect(decoded.confidence).toBeCloseTo(sample.measurement.confidence, 2)
-    expect(encoded.metadata.sample_hz).toBe(10)
+    expect(encoded.metadata.sample_hz).toBe(2)
   })
 
-  it('bounds a seven-minute 10 Hz trace to 138616 bytes', () => {
+  it('bounds a seven-minute 2 Hz trace to 27736 bytes', () => {
     const item = traceSample(telemetry(), undefined, 0, 0)
-    expect(encodeTrace(Array.from({ length: 4200 }, (_, index) => ({ ...item, elapsedMs: index * 100 }))).bytes.byteLength).toBe(138616)
+    expect(encodeTrace(Array.from({ length: 840 }, (_, index) => ({ ...item, elapsedMs: index * 500 }))).bytes.byteLength).toBe(27736)
   })
 
   it('rejects corruption', () => {
     const encoded = encodeTrace([traceSample(telemetry(), undefined, 0, 0)])
     encoded.bytes[20] ^= 1
     expect(() => decodeTrace(encoded.bytes)).toThrow('checksum')
+  })
+
+  it('round trips large saved weights without scaling them down', () => {
+    const samples = [
+      { ...traceSample(telemetry(), undefined, 0, 0), upper: 18.4, lower: 246.8, total: 265.2 },
+      { ...traceSample(telemetry(), undefined, 100, 0), upper: 16.2, lower: 254.7, total: 270.9 },
+      { ...traceSample(telemetry(), undefined, 200, 0), upper: 450.5, lower: 32.1, total: 482.6 },
+    ]
+    const decoded = decodeTrace(encodeTrace(samples).bytes)
+    expect(decoded.map((sample) => sample.total)).toEqual([265.2, 270.9, 482.6])
   })
 
   it('publishes append and clear events without copying the trace array', () => {
@@ -151,9 +328,39 @@ describe('10 Hz trace format', () => {
     const sample = traceSample(telemetry(), undefined, 250, 0)
     expect(traceColumns([sample])).toEqual([[0.25], [20], [10], [10]])
   })
+
+  it('distinguishes drawable weight values from timestamp-only trace frames', () => {
+    const sample = traceSample(telemetry(), undefined, 250, 0)
+    expect(hasPlottableValues(traceColumns([sample]))).toBe(true)
+    expect(hasPlottableValues(traceColumns([{ ...sample, upper: Number.NaN, lower: Number.NaN, total: Number.NaN }]))).toBe(false)
+  })
+
+  it('keeps the fullscreen backdrop fixed to recipe time without discarding the recorded overrun', () => {
+    const early = traceSample(telemetry(), undefined, 45_000, 0)
+    const overrun = traceSample(telemetry(), undefined, 240_000, 0)
+    const allColumns = traceColumns([early, overrun])
+    expect(columnsWithinTimeDomain(allColumns, 180)).toEqual([[45], [20], [10], [10]])
+    expect(allColumns).toEqual([[45, 240], [20, 20], [10, 10], [10, 10]])
+  })
+
+  it('uses the recipe water target as the fullscreen vertical frame until real data exceeds it', () => {
+    const inRange = [[0, 30], [0, 120], [0, 60], [0, 60]] as const
+    const outOfRange = [[0, 30], [-5, 340], [0, 60], [0, 60]] as const
+    expect(weightDomainForTarget(inRange.map((series) => [...series]) as [number[], Array<number | null>, Array<number | null>, Array<number | null>], 320)).toEqual([0, 320])
+    expect(weightDomainForTarget(outOfRange.map((series) => [...series]) as [number[], Array<number | null>, Array<number | null>, Array<number | null>], 320)).toEqual([-18.8, 353.8])
+  })
 })
 
 describe('brew graph milestones and dual tare', () => {
+  it('keeps every scheduled focus marker visible and emphasizes only the shared five-second cue window', () => {
+    const schedule = buildSchedule(defaultRecipes[0])
+    const markers = scheduledBrewMilestones(schedule)
+    expect(markers.map((marker) => marker.label)).toEqual(['Bloom', 'Pour 1', 'Pour 2', 'Pour 3', 'Final pour', 'Drawdown'])
+    expect(milestoneIsImminent(markers[1], markers[1].elapsedSeconds - 5)).toBe(true)
+    expect(milestoneIsImminent(markers[1], markers[1].elapsedSeconds - 5.1)).toBe(false)
+    expect(milestoneIsImminent(markers[1], markers[1].elapsedSeconds)).toBe(false)
+  })
+
   it('labels coffee and actual pour transitions without inventing missed points', () => {
     const recipe = { ...defaultRecipes[0], coffee: 16, water: 320, bloom: 60, poursAfterBloom: 4 }
     const schedule = buildSchedule(recipe)

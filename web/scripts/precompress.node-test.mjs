@@ -1,0 +1,79 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import test from 'node:test'
+import { gunzipSync } from 'node:zlib'
+
+import { gzipDeterministic, precompressDirectory, shouldCompress, stampServiceWorker, summarizeAssets } from './precompress.mjs'
+
+test('selects only frontend text formats', () => {
+  for (const file of ['index.html', 'app.js', 'style.css', 'data.json', 'logo.svg', 'manifest.webmanifest', 'APP.JS']) {
+    assert.equal(shouldCompress(file), true, file)
+  }
+  for (const file of ['font.woff2', 'image.png', 'photo.jpg', 'photo.jpeg', 'image.webp', 'app.js.gz']) {
+    assert.equal(shouldCompress(file), false, file)
+  }
+})
+
+test('stamps the service-worker cache from generated frontend contents', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pourframe-sw-version-'))
+  try {
+    await writeFile(path.join(directory, 'sw.js'), "const CACHE='__POURFRAME_CACHE_VERSION__'\n")
+    await writeFile(path.join(directory, 'index.html'), '<main>one</main>')
+    const first = await stampServiceWorker(directory)
+    assert.match(first, /^[a-f0-9]{16}$/)
+    assert.match(await readFile(path.join(directory, 'sw.js'), 'utf8'), new RegExp(first))
+
+    await writeFile(path.join(directory, 'sw.js'), "const CACHE='__POURFRAME_CACHE_VERSION__'\n")
+    await writeFile(path.join(directory, 'index.html'), '<main>two</main>')
+    const second = await stampServiceWorker(directory)
+    assert.notEqual(second, first)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('gzip output is deterministic and round trips', () => {
+  const input = Buffer.from('PourFrame deterministic gzip\n'.repeat(50))
+  const first = gzipDeterministic(input)
+  const second = gzipDeterministic(input)
+  assert.deepEqual(first, second)
+  assert.deepEqual(gunzipSync(first), input)
+  assert.equal(first[4], 0)
+  assert.equal(first[5], 0)
+  assert.equal(first[6], 0)
+  assert.equal(first[7], 0)
+})
+
+test('recursively replaces eligible files and preserves compressed formats', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pourframe-gzip-'))
+  try {
+    await mkdir(path.join(directory, 'assets'))
+    const html = Buffer.from('<!doctype html><main>PourFrame</main>')
+    const js = Buffer.from('console.log("PourFrame")'.repeat(20))
+    const font = Buffer.from([0x77, 0x4f, 0x46, 0x32])
+    const manifest = Buffer.from('{"name":"PourFrame"}')
+    const serviceWorker = Buffer.from("const CACHE='__POURFRAME_CACHE_VERSION__'")
+    await writeFile(path.join(directory, 'index.html'), html)
+    await writeFile(path.join(directory, 'assets', 'app.js'), js)
+    await writeFile(path.join(directory, 'assets', 'font.woff2'), font)
+    await writeFile(path.join(directory, 'manifest.webmanifest'), manifest)
+    await writeFile(path.join(directory, 'sw.js'), serviceWorker)
+
+    const assets = await precompressDirectory(directory)
+    assert.deepEqual(await readdir(directory), ['assets', 'index.html.gz', 'manifest.webmanifest.gz', 'sw.js.gz'])
+    assert.deepEqual((await readdir(path.join(directory, 'assets'))).sort(), ['app.js.gz', 'font.woff2'])
+    assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'index.html.gz'))), html)
+    assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'assets', 'app.js.gz'))), js)
+    assert.deepEqual(await readFile(path.join(directory, 'assets', 'font.woff2')), font)
+    assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'manifest.webmanifest.gz'))), manifest)
+    assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_CACHE_VERSION__/)
+
+    const totals = summarizeAssets(assets)
+    assert.ok(totals.rawBytes >= html.length + js.length + font.length + manifest.length)
+    assert.ok(totals.storedBytes < totals.rawBytes)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})

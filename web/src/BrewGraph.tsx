@@ -3,16 +3,21 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { BrewRecipe, BrewStep, StepTransition } from './brewTypes'
 import type { BrewTraceBuffer, BrewTraceBufferEvent, BrewTraceSample } from './trace'
+import { cssColor, withAlpha } from './chartTheme'
+import { stepCueLeadSeconds } from './brew'
 
 type GraphColumns = [number[], Array<number | null>, Array<number | null>, Array<number | null>]
+const smoothPath = uPlot.paths.spline?.({ alignGaps: 0 })
 
 export interface BrewMilestone {
   id: string
   label: string
   elapsedSeconds: number
   targetGrams: number | null
-  kind: 'coffee' | 'pour'
+  kind: 'coffee' | 'pour' | 'drawdown'
 }
+
+export type BrewGraphVariant = 'card' | 'backdrop'
 
 function formatTarget(value: number) {
   return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)
@@ -36,9 +41,70 @@ export function brewMilestones(recipe: BrewRecipe, schedule: BrewStep[], transit
   return milestones
 }
 
+/** Scheduled focus markers stay visible even when a physical transition is late. */
+export function scheduledBrewMilestones(schedule: BrewStep[]): BrewMilestone[] {
+  return schedule.map((step) => ({
+    id: `scheduled:${step.id}`,
+    label: step.name,
+    elapsedSeconds: step.start,
+    targetGrams: step.cumulative,
+    kind: step.kind,
+  }))
+}
+
+export function milestoneIsImminent(milestone: BrewMilestone, elapsedSeconds?: number) {
+  return elapsedSeconds != null && milestone.elapsedSeconds > elapsedSeconds && milestone.elapsedSeconds - elapsedSeconds <= stepCueLeadSeconds
+}
+
 function emptyColumns(): GraphColumns { return [[], [], [], []] }
 const placeholderColumns: GraphColumns = [[0, 1], [0, 0], [null, null], [null, null]]
 function plottableColumns(columns: GraphColumns) { return columns[0].length ? columns : placeholderColumns }
+function copyColumns(columns: GraphColumns): GraphColumns { return [columns[0].slice(), columns[1].slice(), columns[2].slice(), columns[3].slice()] }
+export function hasPlottableValues(columns: GraphColumns) {
+  return columns.slice(1).some((series) => series.some((value) => value != null && Number.isFinite(value)))
+}
+
+/**
+ * The focus view is a recipe-time composition, not a scrolling monitor. Keep
+ * the raw trace intact for saving/history, but expose only its in-target-time
+ * portion to that presentation.
+ */
+export function columnsWithinTimeDomain(columns: GraphColumns, durationSeconds?: number): GraphColumns {
+  if (durationSeconds == null || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return columns
+  const visible = emptyColumns()
+  for (let index = 0; index < columns[0].length; index += 1) {
+    if (columns[0][index] < 0 || columns[0][index] > durationSeconds) continue
+    visible[0].push(columns[0][index])
+    visible[1].push(columns[1][index])
+    visible[2].push(columns[2][index])
+    visible[3].push(columns[3][index])
+  }
+  return visible
+}
+
+function weightDomainFromExtent(minimum: number, maximum: number, targetGrams?: number): [number, number] {
+  if (targetGrams == null || !Number.isFinite(targetGrams) || targetGrams <= 0) return [minimum, maximum]
+  const belowZero = minimum < 0
+  const aboveTarget = maximum > targetGrams
+  if (!belowZero && !aboveTarget) return [0, targetGrams]
+  const span = Math.max(targetGrams, maximum) - Math.min(0, minimum)
+  const padding = Math.max(2, span * 0.04)
+  return [belowZero ? minimum - padding : 0, aboveTarget ? maximum + padding : targetGrams]
+}
+
+/** The focus backdrop keeps the recipe target as its normal vertical frame. */
+export function weightDomainForTarget(columns: GraphColumns, targetGrams?: number): [number, number] | null {
+  let minimum = Infinity
+  let maximum = -Infinity
+  for (const series of columns.slice(1)) {
+    for (const value of series) {
+      if (value == null || !Number.isFinite(value)) continue
+      minimum = Math.min(minimum, value)
+      maximum = Math.max(maximum, value)
+    }
+  }
+  return minimum === Infinity ? null : weightDomainFromExtent(minimum, maximum, targetGrams)
+}
 
 function appendColumn(columns: GraphColumns, sample: BrewTraceSample) {
   columns[0].push(sample.elapsedMs / 1000)
@@ -53,11 +119,7 @@ export function traceColumns(samples: BrewTraceSample[]) {
   return columns
 }
 
-function cssColor(name: string, fallback: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
-}
-
-function milestonePlugin(getMilestones: () => BrewMilestone[]): uPlot.Plugin {
+function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant): uPlot.Plugin {
   return {
     hooks: {
       draw: [(plot) => {
@@ -68,7 +130,11 @@ function milestonePlugin(getMilestones: () => BrewMilestone[]): uPlot.Plugin {
         for (const [index, milestone] of milestones.entries()) {
           const x = plot.valToPos(milestone.elapsedSeconds, 'x', true)
           if (x < bbox.left || x > bbox.left + bbox.width) continue
-          ctx.strokeStyle = milestone.kind === 'coffee' ? cssColor('--app-muted', '#76706b') : cssColor('--app-accent', '#9c4d25')
+          const imminent = milestoneIsImminent(milestone, getElapsedSeconds())
+          const markerColor = variant === 'backdrop'
+            ? imminent ? 'rgba(123, 215, 150, .96)' : 'rgba(174, 179, 170, .38)'
+            : milestone.kind === 'coffee' ? cssColor('--app-muted', '#76706b') : cssColor('--app-accent', '#9c4d25')
+          ctx.strokeStyle = markerColor
           ctx.fillStyle = ctx.strokeStyle
           ctx.setLineDash([4, 4])
           ctx.beginPath(); ctx.moveTo(x, bbox.top); ctx.lineTo(x, bbox.top + bbox.height); ctx.stroke()
@@ -78,6 +144,16 @@ function milestonePlugin(getMilestones: () => BrewMilestone[]): uPlot.Plugin {
             if (y >= bbox.top && y <= bbox.top + bbox.height) {
               ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill()
             }
+          }
+          if (variant === 'backdrop') {
+            ctx.globalAlpha = imminent ? 1 : .48
+            ctx.fillStyle = imminent ? '#d8f5df' : 'rgba(174, 179, 170, .82)'
+            ctx.font = `${imminent ? '700' : '600'} ${imminent ? '11' : '9'}px Inter, ui-sans-serif, system-ui, sans-serif`
+            const labelX = Math.max(bbox.left + 4, Math.min(x + 5, bbox.left + bbox.width - 70))
+            const labelY = bbox.top + 14 + (index % 2) * 13
+            ctx.fillText(milestone.label, labelX, labelY)
+            ctx.globalAlpha = 1
+            continue
           }
           const width = Math.ceil(ctx.measureText(milestone.label).width) + 12
           const labelX = Math.max(bbox.left, Math.min(x + 5, bbox.left + bbox.width - width))
@@ -95,27 +171,97 @@ function milestonePlugin(getMilestones: () => BrewMilestone[]): uPlot.Plugin {
   }
 }
 
-function graphOptions(width: number, height: number, getMilestones: () => BrewMilestone[]): uPlot.Options {
+function graphOptions(width: number, height: number, getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant, timeDomainSeconds?: number, weightDomainTargetGrams?: number): uPlot.Options {
   const value = (_plot: uPlot, raw: number | null) => raw == null ? '—' : `${raw.toFixed(1)} g`
+  const total = variant === 'backdrop' ? '#7bd796' : cssColor('--chart-total', '#512612')
+  const upper = variant === 'backdrop' ? '#8ac7df' : cssColor('--chart-upper', '#336b8e')
+  const lower = variant === 'backdrop' ? '#b2dfa8' : cssColor('--chart-lower', '#247a36')
   const axis = cssColor('--app-muted', '#76706b')
   const grid = cssColor('--app-line', '#dedbd8')
   return {
     width, height,
-    scales: { x: { time: false } },
-    cursor: { drag: { setScale: false, x: false, y: false }, focus: { prox: 30 } },
-    legend: { show: true, live: true },
+    scales: {
+      x: { time: false, range: timeDomainSeconds == null ? undefined : [0, timeDomainSeconds] },
+      y: { range: weightDomainTargetGrams == null ? undefined : (_plot, minimum, maximum) => weightDomainFromExtent(minimum, maximum, weightDomainTargetGrams) },
+    },
+    cursor: variant === 'backdrop' ? { show: false } : { drag: { setScale: false, x: false, y: false }, focus: { prox: 30 } },
+    legend: { show: variant === 'card', live: true },
     series: [
       { label: 'Time', value: (_plot, raw) => raw == null ? '—' : `${raw.toFixed(1)} s` },
-      { label: 'Combined', stroke: cssColor('--chart-total', '#512612'), width: 2.5, spanGaps: false, points: { show: false }, value },
-      { label: 'Upper', stroke: cssColor('--chart-upper', '#336b8e'), width: 1.5, dash: [9, 5], spanGaps: false, points: { show: false }, value },
-      { label: 'Lower', stroke: cssColor('--chart-lower', '#247a36'), width: 1.5, dash: [2, 5], spanGaps: false, points: { show: false }, value },
+      { label: 'Combined', paths: smoothPath, stroke: withAlpha(total, variant === 'backdrop' ? 0.92 : 0.92), fill: withAlpha(total, variant === 'backdrop' ? 0.18 : 0.12), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 3.2 : 2.3, spanGaps: false, points: { show: false }, value },
+      { label: 'Upper', paths: smoothPath, stroke: withAlpha(upper, variant === 'backdrop' ? 0.58 : 0.88), fill: withAlpha(upper, variant === 'backdrop' ? 0.07 : 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 1.8 : 1.8, spanGaps: false, points: { show: false }, value },
+      { label: 'Lower', paths: smoothPath, stroke: withAlpha(lower, variant === 'backdrop' ? 0.58 : 0.88), fill: withAlpha(lower, variant === 'backdrop' ? 0.07 : 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 1.8 : 1.8, spanGaps: false, points: { show: false }, value },
     ],
-    axes: [
+    axes: variant === 'backdrop' ? [] : [
       { label: 'Brew time (s)', stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid, width: 1 }, values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(tick < 10 ? 1 : 0)) },
       { label: 'Weight (g)', stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid, width: 1 }, values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(1)), size: 58 },
     ],
-    plugins: [milestonePlugin(getMilestones)],
+    plugins: [milestonePlugin(getMilestones, getElapsedSeconds, variant)],
   }
+}
+
+function tracePath(times: number[], values: Array<number | null>, minX: number, maxX: number, minY: number, maxY: number) {
+  const xSpan = Math.max(1, maxX - minX)
+  const ySpan = Math.max(1, maxY - minY)
+  let path = ''
+  let drawing = false
+  for (let index = 0; index < times.length; index += 1) {
+    const value = values[index]
+    if (value == null || !Number.isFinite(value)) { drawing = false; continue }
+    const x = ((times[index] - minX) / xSpan) * 1000
+    const y = 560 - ((value - minY) / ySpan) * 520
+    path += `${drawing ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`
+    drawing = true
+  }
+  return path
+}
+
+function traceAreaPath(times: number[], values: Array<number | null>, minX: number, maxX: number, minY: number, maxY: number) {
+  const xSpan = Math.max(1, maxX - minX)
+  const ySpan = Math.max(1, maxY - minY)
+  let path = ''
+  let firstX = 0
+  let lastX = 0
+  let drawing = false
+  for (let index = 0; index < times.length; index += 1) {
+    const value = values[index]
+    if (value == null || !Number.isFinite(value)) {
+      if (drawing) path += `L${lastX.toFixed(2)},560L${firstX.toFixed(2)},560Z`
+      drawing = false
+      continue
+    }
+    const x = ((times[index] - minX) / xSpan) * 1000
+    const y = 560 - ((value - minY) / ySpan) * 520
+    if (!drawing) {
+      firstX = x
+      path += `M${x.toFixed(2)},560L${x.toFixed(2)},${y.toFixed(2)}`
+      drawing = true
+    } else {
+      path += `L${x.toFixed(2)},${y.toFixed(2)}`
+    }
+    lastX = x
+  }
+  if (drawing) path += `L${lastX.toFixed(2)},560L${firstX.toFixed(2)},560Z`
+  return path
+}
+
+function TraceOverlay({ columns, variant, timeDomainSeconds, weightDomainTargetGrams }: { columns: GraphColumns; variant: BrewGraphVariant; timeDomainSeconds?: number; weightDomainTargetGrams?: number }) {
+  const finiteValues: number[] = []
+  for (const series of columns.slice(1)) for (const value of series) if (value != null && Number.isFinite(value)) finiteValues.push(value)
+  if (!finiteValues.length || !columns[0].length) return null
+  const minX = timeDomainSeconds == null ? Math.min(...columns[0]) : 0
+  const maxX = timeDomainSeconds == null ? Math.max(...columns[0]) : timeDomainSeconds
+  const dataMin = Math.min(...finiteValues)
+  const dataMax = Math.max(...finiteValues)
+  const targetDomain = weightDomainForTarget(columns, weightDomainTargetGrams)
+  const padding = Math.max(2, (dataMax - dataMin) * 0.08)
+  const [minY, maxY] = targetDomain ?? [Math.max(0, dataMin - padding), dataMax + padding]
+  return <svg aria-hidden="true" className={`brew-graph__trace brew-graph__trace--${variant}`} preserveAspectRatio="none" viewBox="0 0 1000 600">
+    {variant === 'backdrop' ? <path className="brew-graph__trace-area" d={traceAreaPath(columns[0], columns[1], minX, maxX, minY, maxY)} /> : null}
+    <path className="brew-graph__trace-total" d={tracePath(columns[0], columns[1], minX, maxX, minY, maxY)} />
+    <path className="brew-graph__trace-upper" d={tracePath(columns[0], columns[2], minX, maxX, minY, maxY)} />
+    <path className="brew-graph__trace-lower" d={tracePath(columns[0], columns[3], minX, maxX, minY, maxY)} />
+  </svg>
 }
 
 interface BrewGraphProps {
@@ -124,37 +270,58 @@ interface BrewGraphProps {
   milestones: BrewMilestone[]
   emptyMessage?: string
   compact?: boolean
+  variant?: BrewGraphVariant
+  decorative?: boolean
+  /** Fixed 0…duration x-axis for the focus backdrop only. */
+  timeDomainSeconds?: number
+  /** Fixed 0…target y-axis for the focus backdrop unless real data exceeds it. */
+  weightDomainTargetGrams?: number
+  /** Current session time; scheduled focus markers become prominent in the cue window. */
+  elapsedSeconds?: number
 }
 
-export function BrewGraph({ source, samples, milestones, emptyMessage = 'The graph begins automatically when Bloom starts.', compact = false }: BrewGraphProps) {
+export function BrewGraph({ source, samples, milestones, emptyMessage = 'The graph begins automatically when Bloom starts.', compact = false, variant = 'card', decorative = false, timeDomainSeconds, weightDomainTargetGrams, elapsedSeconds }: BrewGraphProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const plotRef = useRef<uPlot | null>(null)
   const columnsRef = useRef<GraphColumns>(samples ? traceColumns(samples) : source ? traceColumns(source.samples()) : emptyColumns())
   const milestonesRef = useRef(milestones)
+  const elapsedSecondsRef = useRef(elapsedSeconds)
   const frameRef = useRef<number | null>(null)
   const resizeFrameRef = useRef<number | null>(null)
-  const [empty, setEmpty] = useState(columnsRef.current[0].length === 0)
+  const [empty, setEmpty] = useState(!hasPlottableValues(columnsRef.current))
+  const [renderColumns, setRenderColumns] = useState<GraphColumns>(() => copyColumns(columnsRef.current))
   milestonesRef.current = milestones
+  elapsedSecondsRef.current = elapsedSeconds
+
+  const syncRenderedColumns = useCallback(() => setRenderColumns(copyColumns(columnsRef.current)), [])
+  const plotColumns = useCallback(() => plottableColumns(columnsWithinTimeDomain(columnsRef.current, timeDomainSeconds)), [timeDomainSeconds])
 
   const updatePlot = useCallback(() => {
     if (frameRef.current != null) return
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null
-      plotRef.current?.setData(plottableColumns(columnsRef.current))
+      plotRef.current?.setData(plotColumns())
     })
-  }, [])
+  }, [plotColumns])
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const height = compact ? 230 : 300
-    plotRef.current = new uPlot(graphOptions(Math.max(280, Math.floor(host.getBoundingClientRect().width)), height, () => milestonesRef.current), plottableColumns(columnsRef.current), host)
+    const size = () => ({
+      width: Math.max(280, Math.floor(host.getBoundingClientRect().width)),
+      height: variant === 'backdrop' ? Math.max(280, Math.floor(host.getBoundingClientRect().height)) : compact ? 230 : 300,
+    })
+    const initialSize = size()
+    // Start with a valid two-point shape, then hydrate it from the source or
+    // saved samples in the data effects below. This avoids relying on the
+    // first render's columns when a history trace arrives asynchronously.
+    plotRef.current = new uPlot(graphOptions(initialSize.width, initialSize.height, () => milestonesRef.current, () => elapsedSecondsRef.current, variant, timeDomainSeconds, weightDomainTargetGrams), placeholderColumns, host)
     const observer = new ResizeObserver(() => {
       if (resizeFrameRef.current != null) return
       resizeFrameRef.current = requestAnimationFrame(() => {
         resizeFrameRef.current = null
-        const width = Math.floor(host.getBoundingClientRect().width)
-        if (width > 0 && plotRef.current && plotRef.current.width !== width) plotRef.current.setSize({ width, height })
+        const nextSize = size()
+        if (plotRef.current && (plotRef.current.width !== nextSize.width || plotRef.current.height !== nextSize.height)) plotRef.current.setSize(nextSize)
       })
     })
     observer.observe(host)
@@ -164,29 +331,39 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
       if (resizeFrameRef.current != null) cancelAnimationFrame(resizeFrameRef.current)
       plotRef.current?.destroy(); plotRef.current = null
     }
-  }, [compact])
+  }, [compact, timeDomainSeconds, variant, weightDomainTargetGrams])
+
+  useEffect(() => {
+    if (!samples) return
+    columnsRef.current = traceColumns(samples)
+    setEmpty(!hasPlottableValues(columnsRef.current))
+    syncRenderedColumns()
+    updatePlot()
+  }, [samples, syncRenderedColumns, updatePlot])
 
   useEffect(() => {
     if (!source) return
     columnsRef.current = traceColumns(source.samples())
-    setEmpty(columnsRef.current[0].length === 0)
+    setEmpty(!hasPlottableValues(columnsRef.current))
+    syncRenderedColumns()
     updatePlot()
     return source.subscribe((event: BrewTraceBufferEvent) => {
       if (event.type === 'clear') {
         columnsRef.current = emptyColumns(); setEmpty(true)
       } else {
         appendColumn(columnsRef.current, event.sample)
-        if (columnsRef.current[0].length === 1) setEmpty(false)
+        setEmpty(!hasPlottableValues(columnsRef.current))
       }
+      syncRenderedColumns()
       updatePlot()
     })
-  }, [source, updatePlot])
+  }, [source, syncRenderedColumns, updatePlot])
 
-  useEffect(() => { plotRef.current?.redraw() }, [milestones])
+  useEffect(() => { plotRef.current?.redraw() }, [elapsedSeconds, milestones])
 
-  return <div className={compact ? 'brew-graph brew-graph--compact' : 'brew-graph'}>
-    <div className="brew-graph__milestones" aria-label="Brew milestones">{milestones.map((milestone) => <span className={`brew-graph__milestone brew-graph__milestone--${milestone.kind}`} key={milestone.id}>{milestone.label}</span>)}</div>
-    <div className="brew-graph__plot" aria-label="Brew weight graph with recipe milestones" ref={hostRef} role="img" />
+  return <div aria-hidden={decorative || undefined} className={`${compact ? 'brew-graph brew-graph--compact' : 'brew-graph'}${variant === 'backdrop' ? ' brew-graph--backdrop' : ''}`}>
+    {variant === 'card' ? <div className="brew-graph__milestones" aria-label="Brew milestones">{milestones.map((milestone) => <span className={`brew-graph__milestone brew-graph__milestone--${milestone.kind}`} key={milestone.id}>{milestone.label}</span>)}</div> : null}
+    <div className="brew-graph__drawing"><div aria-label={decorative ? undefined : 'Brew weight graph with recipe milestones'} className="brew-graph__plot" ref={hostRef} role={decorative ? undefined : 'img'} /><TraceOverlay columns={columnsWithinTimeDomain(renderColumns, timeDomainSeconds)} timeDomainSeconds={timeDomainSeconds} variant={variant} weightDomainTargetGrams={weightDomainTargetGrams} /></div>
     {empty ? <p className="brew-graph__empty">{emptyMessage}</p> : null}
   </div>
 }

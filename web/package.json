@@ -5,14 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/precompress.mjs",
     "lint": "tsc -b --pretty false",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/precompress.node-test.mjs scripts/service-worker.node-test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/oswald": "^5.3.0",
+    "@heroicons/react": "^2.2.0",
     "geist": "^1.7.2",
-    "lucide-react": "0.468.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "uplot": "1.6.32"

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { BrewRecipe, BrewRecord, Collection } from './brewTypes'
+import type { BrewRecipe, BrewRecord, CoffeeBag, Collection } from './brewTypes'
 import { defaultRecipes } from './defaultRecipes'
+import { defaultCoffeeBags } from './defaultCoffeeBags'
 import { buildSchedule, migrateRecipe } from './brew'
+import { normalizeCoffeeBag } from './coffeeBag'
 import { decodeTrace, type BrewTraceSample } from './trace'
 
 type LibraryStatus = 'loading' | 'ready' | 'cached' | 'error'
@@ -15,8 +17,15 @@ const cacheStore = 'cache'
 const outboxStore = 'outbox'
 let mockRecipes: Collection<BrewRecipe> = { v: 1, revision: 0, items: [] }
 let mockBrews: Collection<BrewRecord> = { v: 1, revision: 0, items: [] }
+let mockCoffeeBags: Collection<CoffeeBag> = { v: 1, revision: 0, items: [] }
 const mockTraces = new Map<string, Uint8Array>()
-interface PendingBrew { id: string; record: BrewRecord; trace?: ArrayBuffer }
+interface PendingBrew { id: string; record: BrewRecord; trace?: ArrayBuffer; coffeeBagId?: string; doseG?: number }
+interface CompletionResponse {
+  v: 1
+  brews: Collection<BrewRecord>
+  coffee_bags: Collection<CoffeeBag>
+  inventory_warning?: string
+}
 
 export class LibraryApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message) }
@@ -134,6 +143,11 @@ async function readBrews() {
   return requestJson<Collection<BrewRecord>>('/api/brews?limit=5')
 }
 
+async function readCoffeeBags() {
+  if (mockMode) return mockCoffeeBags
+  return requestJson<Collection<CoffeeBag>>('/api/coffee-bags')
+}
+
 async function postRecipe(recipe: BrewRecipe, baseRevision: number) {
   recipe = migrateRecipe(recipe)
   if (mockMode) {
@@ -146,12 +160,34 @@ async function postRecipe(recipe: BrewRecipe, baseRevision: number) {
   return requestJson<Collection<BrewRecipe>>('/api/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 1, base_revision: baseRevision, recipe }) })
 }
 
-async function postBrew(brew: BrewRecord) {
+async function postCoffeeBag(coffeeBag: CoffeeBag, baseRevision: number) {
+  coffeeBag = normalizeCoffeeBag(coffeeBag)
   if (mockMode) {
-    if (!mockBrews.items.some((item) => item.id === brew.id)) mockBrews = { v: 1, revision: mockBrews.revision + 1, items: retainNewestBrews([brew, ...mockBrews.items]) }
-    return mockBrews
+    const found = mockCoffeeBags.items.findIndex((item) => item.id === coffeeBag.id)
+    const items = [...mockCoffeeBags.items]
+    if (found >= 0) items[found] = coffeeBag; else items.unshift(coffeeBag)
+    mockCoffeeBags = { v: 1, revision: mockCoffeeBags.revision + 1, items: items.slice(0, 24) }
+    return mockCoffeeBags
   }
-  return requestJson<Collection<BrewRecord>>('/api/brews', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 1, brew }) })
+  return requestJson<Collection<CoffeeBag>>('/api/coffee-bags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 1, base_revision: baseRevision, coffee_bag: coffeeBag }) })
+}
+
+async function postBrewCompletion(brew: BrewRecord, coffeeBagId: string | undefined, doseG: number | undefined, coffeeBagRevision: number) {
+  if (mockMode) {
+    if (!mockBrews.items.some((item) => item.id === brew.id)) {
+      mockBrews = { v: 1, revision: mockBrews.revision + 1, items: retainNewestBrews([brew, ...mockBrews.items]) }
+      if (coffeeBagId && doseG && doseG > 0) {
+        mockCoffeeBags = {
+          v: 1,
+          revision: mockCoffeeBags.revision + 1,
+          items: mockCoffeeBags.items.map((bag) => bag.id === coffeeBagId ? { ...bag, remainingWeightG: Math.max(0, bag.remainingWeightG - doseG), updatedAt: new Date().toISOString() } : bag),
+        }
+      }
+    }
+    return { v: 1, brews: mockBrews, coffee_bags: mockCoffeeBags } satisfies CompletionResponse
+  }
+  const coffeeBagUse = coffeeBagId && doseG !== undefined ? { bag_id: coffeeBagId, dose_g: doseG, base_revision: coffeeBagRevision } : null
+  return requestJson<CompletionResponse>('/api/brew-completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ v: 1, brew, coffee_bag_use: coffeeBagUse }) })
 }
 
 async function putTrace(id: string, trace: ArrayBuffer | Uint8Array) {
@@ -183,42 +219,67 @@ export function legacyDataAvailable() {
 export function useLibrary() {
   const [recipes, setRecipes] = useState<BrewRecipe[]>(defaultRecipes)
   const [brews, setBrews] = useState<BrewRecord[]>([])
+  const [coffeeBags, setCoffeeBags] = useState<CoffeeBag[]>([])
   const [status, setStatus] = useState<LibraryStatus>('loading')
   const [message, setMessage] = useState('Loading shared recipes…')
   const [hasLegacy, setHasLegacy] = useState(legacyDataAvailable)
   const recipeRevision = useRef(0)
   const brewRevision = useRef(0)
+  const coffeeBagRevision = useRef(0)
 
   const refresh = useCallback(async () => {
     setStatus('loading')
     try {
-      let [recipeCollection, brewCollection] = await Promise.all([readRecipes(), readBrews()])
+      let [recipeCollection, brewCollection, coffeeBagCollection] = await Promise.all([readRecipes(), readBrews(), readCoffeeBags()])
       recipeCollection = { ...recipeCollection, items: recipeCollection.items.map(migrateRecipe) }
       brewCollection = { ...brewCollection, items: retainNewestBrews(brewCollection.items) }
+      coffeeBagCollection = { ...coffeeBagCollection, items: coffeeBagCollection.items.map(normalizeCoffeeBag) }
       if (recipeCollection.items.length === 0) {
         for (const recipe of defaultRecipes) recipeCollection = await postRecipe(recipe, recipeCollection.revision)
       }
+      if (coffeeBagCollection.items.length === 0) {
+        for (const coffeeBag of defaultCoffeeBags) coffeeBagCollection = await postCoffeeBag(coffeeBag, coffeeBagCollection.revision)
+      }
       recipeRevision.current = recipeCollection.revision
       brewRevision.current = brewCollection.revision
+      coffeeBagRevision.current = coffeeBagCollection.revision
       setRecipes(recipeCollection.items)
       setBrews(brewCollection.items)
+      setCoffeeBags(coffeeBagCollection.items)
       setStatus('ready'); setMessage('Shared data is stored on PourFrame')
-      await Promise.all([databasePut(cacheStore, recipeCollection, 'recipes'), databasePut(cacheStore, brewCollection, 'brews')])
+      await Promise.all([databasePut(cacheStore, recipeCollection, 'recipes'), databasePut(cacheStore, brewCollection, 'brews'), databasePut(cacheStore, coffeeBagCollection, 'coffee-bags')])
       const pending = await databaseAll<PendingBrew | BrewRecord>(outboxStore)
       for (const item of pending) {
         const record = 'record' in item ? item.record : item
         const trace = 'record' in item ? item.trace : undefined
         if (trace) await putTrace(record.id, trace)
-        brewCollection = await postBrew(record)
+        let completion: CompletionResponse
+        try {
+          completion = await postBrewCompletion(record, 'record' in item ? item.coffeeBagId : undefined, 'record' in item ? item.doseG : undefined, coffeeBagRevision.current)
+        } catch (error) {
+          if (!(error instanceof LibraryApiError) || error.status !== 409) throw error
+          coffeeBagCollection = await readCoffeeBags()
+          coffeeBagRevision.current = coffeeBagCollection.revision
+          completion = await postBrewCompletion(record, 'record' in item ? item.coffeeBagId : undefined, 'record' in item ? item.doseG : undefined, coffeeBagRevision.current)
+        }
+        brewCollection = completion.brews
+        coffeeBagCollection = completion.coffee_bags
+        coffeeBagRevision.current = coffeeBagCollection.revision
         await databaseDelete(outboxStore, record.id)
       }
-      if (pending.length) { brewRevision.current = brewCollection.revision; setBrews(brewCollection.items) }
+      if (pending.length) {
+        brewRevision.current = brewCollection.revision
+        setBrews(brewCollection.items)
+        setCoffeeBags(coffeeBagCollection.items)
+        await Promise.all([databasePut(cacheStore, brewCollection, 'brews'), databasePut(cacheStore, coffeeBagCollection, 'coffee-bags')])
+      }
     } catch (error) {
-      const [cachedRecipes, cachedBrews] = await Promise.all([
-        databaseGet<Collection<BrewRecipe>>(cacheStore, 'recipes'), databaseGet<Collection<BrewRecord>>(cacheStore, 'brews'),
+      const [cachedRecipes, cachedBrews, cachedCoffeeBags] = await Promise.all([
+        databaseGet<Collection<BrewRecipe>>(cacheStore, 'recipes'), databaseGet<Collection<BrewRecord>>(cacheStore, 'brews'), databaseGet<Collection<CoffeeBag>>(cacheStore, 'coffee-bags'),
       ]).catch(() => [undefined, undefined])
       if (cachedRecipes?.items.length) setRecipes(cachedRecipes.items)
       if (cachedBrews) setBrews(cachedBrews.items)
+      if (cachedCoffeeBags) setCoffeeBags(cachedCoffeeBags.items)
       setStatus(cachedRecipes ? 'cached' : 'error')
       setMessage(error instanceof Error ? error.message : 'Shared data is unavailable')
     }
@@ -260,13 +321,60 @@ export function useLibrary() {
     }
   }, [])
 
-  const saveBrew = useCallback(async (brew: BrewRecord, trace?: Uint8Array) => {
-    const pending: PendingBrew = { id: brew.id, record: brew, trace: trace?.buffer.slice(trace.byteOffset, trace.byteOffset + trace.byteLength) as ArrayBuffer | undefined }
+  const saveCoffeeBag = useCallback(async (coffeeBag: CoffeeBag) => {
+    try {
+      let collection = await postCoffeeBag(coffeeBag, coffeeBagRevision.current)
+      coffeeBagRevision.current = collection.revision
+      setCoffeeBags(collection.items)
+      await databasePut(cacheStore, collection, 'coffee-bags')
+    } catch (error) {
+      if (!(error instanceof LibraryApiError) || error.status !== 409) throw error
+      const latest = await readCoffeeBags()
+      coffeeBagRevision.current = latest.revision
+      const collection = await postCoffeeBag(coffeeBag, latest.revision)
+      coffeeBagRevision.current = collection.revision
+      setCoffeeBags(collection.items)
+      await databasePut(cacheStore, collection, 'coffee-bags')
+    }
+  }, [])
+
+  const deleteCoffeeBag = useCallback(async (id: string) => {
+    if (mockMode) {
+      mockCoffeeBags = { ...mockCoffeeBags, revision: mockCoffeeBags.revision + 1, items: mockCoffeeBags.items.filter((item) => item.id !== id) }
+      coffeeBagRevision.current = mockCoffeeBags.revision; setCoffeeBags(mockCoffeeBags.items); return
+    }
+    const remove = (revision: number) => requestJson<Collection<CoffeeBag>>(`/api/coffee-bags?id=${encodeURIComponent(id)}&base_revision=${revision}`, { method: 'DELETE' })
+    try {
+      const collection = await remove(coffeeBagRevision.current)
+      coffeeBagRevision.current = collection.revision; setCoffeeBags(collection.items); await databasePut(cacheStore, collection, 'coffee-bags')
+    } catch (error) {
+      if (!(error instanceof LibraryApiError) || error.status !== 409) throw error
+      const latest = await readCoffeeBags(); coffeeBagRevision.current = latest.revision
+      const collection = await remove(latest.revision)
+      coffeeBagRevision.current = collection.revision; setCoffeeBags(collection.items); await databasePut(cacheStore, collection, 'coffee-bags')
+    }
+  }, [])
+
+  const saveBrew = useCallback(async (brew: BrewRecord, trace?: Uint8Array, coffeeBagId?: string, doseG?: number) => {
+    const pending: PendingBrew = { id: brew.id, record: brew, trace: trace?.buffer.slice(trace.byteOffset, trace.byteOffset + trace.byteLength) as ArrayBuffer | undefined, coffeeBagId, doseG }
     try {
       if (trace) await putTrace(brew.id, trace)
-      const collection = await postBrew(brew)
-      brewRevision.current = collection.revision; setBrews(collection.items)
-      await Promise.all([databasePut(cacheStore, collection, 'brews'), databaseDelete(outboxStore, brew.id)])
+      let completion: CompletionResponse
+      try {
+        completion = await postBrewCompletion(brew, coffeeBagId, doseG, coffeeBagRevision.current)
+      } catch (error) {
+        if (!(error instanceof LibraryApiError) || error.status !== 409) throw error
+        const latest = await readCoffeeBags()
+        coffeeBagRevision.current = latest.revision
+        setCoffeeBags(latest.items)
+        completion = await postBrewCompletion(brew, coffeeBagId, doseG, latest.revision)
+      }
+      brewRevision.current = completion.brews.revision
+      coffeeBagRevision.current = completion.coffee_bags.revision
+      setBrews(completion.brews.items)
+      setCoffeeBags(completion.coffee_bags.items)
+      await Promise.all([databasePut(cacheStore, completion.brews, 'brews'), databasePut(cacheStore, completion.coffee_bags, 'coffee-bags'), databaseDelete(outboxStore, brew.id)])
+      return completion.inventory_warning
     } catch (error) {
       await databasePut(outboxStore, pending)
       throw error
@@ -290,5 +398,5 @@ export function useLibrary() {
     setHasLegacy(false)
   }, [saveBrew, saveRecipe])
 
-  return { recipes, brews, status, message, hasLegacy, refresh, saveRecipe, deleteRecipe, saveBrew, clearBrews, importLegacy }
+  return { recipes, brews, coffeeBags, status, message, hasLegacy, refresh, saveRecipe, deleteRecipe, saveCoffeeBag, deleteCoffeeBag, saveBrew, clearBrews, importLegacy }
 }
