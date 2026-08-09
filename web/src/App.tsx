@@ -735,7 +735,7 @@ interface PreparationModalProps {
   onStartTimer: () => void
 }
 
-function PreparationFocus({ stage, message, recipe, coffeeBag, usableUpper, usableLower, onClose, onPrepare, onStart, onStartTimer, fullscreenActive, traceBuffer, milestones }: PreparationModalProps & { fullscreenActive: boolean; traceBuffer: BrewTraceBuffer; milestones: ReturnType<typeof brewMilestones> }) {
+function PreparationFocus({ stage, message, recipe, coffeeBag, usableUpper, usableLower, onClose, onPrepare, onStart, onStartTimer, fullscreenActive, dark, traceBuffer, milestones }: PreparationModalProps & { fullscreenActive: boolean; dark: boolean; traceBuffer: BrewTraceBuffer; milestones: ReturnType<typeof brewMilestones> }) {
   const [coffeeReady, setCoffeeReady] = useState(false)
   const [carafeReady, setCarafeReady] = useState(false)
   const [lowStockConfirmed, setLowStockConfirmed] = useState(false)
@@ -784,8 +784,8 @@ function PreparationFocus({ stage, message, recipe, coffeeBag, usableUpper, usab
   }, [canExit, exit, onClose])
 
   return createPortal(
-    <div aria-labelledby="prepare-focus-title" aria-modal="true" className="active-brew-summary active-brew-summary--preparing" data-display-mode={fullscreenActive ? 'fullscreen' : 'focus'} role="dialog">
-      <div aria-hidden="true" className="active-brew-summary__graph"><BrewGraph decorative emptyMessage="Live graph begins with Bloom." milestones={milestones} source={traceBuffer} timeDomainSeconds={recipe.brewTime} variant="backdrop" weightDomainTargetGrams={recipe.water} /></div>
+    <div aria-labelledby="prepare-focus-title" aria-modal="true" className="active-brew-summary active-brew-summary--preparing" data-display-mode={fullscreenActive ? 'fullscreen' : 'focus'} data-theme={dark ? 'dark' : 'light'} role="dialog">
+      <div aria-hidden="true" className="active-brew-summary__graph"><BrewGraph decorative emptyMessage="Live graph begins with Bloom." milestones={milestones} source={traceBuffer} theme={dark ? 'dark' : 'light'} timeDomainSeconds={recipe.brewTime} variant="backdrop" weightDomainTargetGrams={recipe.water} /></div>
       <div className="active-brew-summary__content active-brew-summary__content--preparing">
         <header className="active-brew-summary__header">
           <div className="active-brew-summary__stage"><span>Guided brew</span><strong id="prepare-focus-title">{stage === 'ready' ? 'Ready to brew' : 'Prepare to brew'}</strong><small>{recipe.name}</small></div>
@@ -1172,8 +1172,8 @@ function App() {
     {preparationDockVisible ? <BrewDock action="prepare" coffeeBag={coffeeBag} disabled={!canStartDevice} onAction={openBrewSelection} recipe={recipe} /> : null}
     {reentryDockVisible ? <BrewDock action={guided.status === 'paused' ? 'resume' : 'fullscreen'} coffeeBag={coffeeBag} disabled={guided.status === 'paused' && guided.deviceBlocked && !canStartDevice} onAction={guided.status === 'paused' ? resumeInFocus : openBrewFocus} recipe={recipe} /> : null}
     {brewSelectionOpen ? <BrewSelectionSheet coffeeBags={library.coffeeBags} dark={dark} onClose={() => setBrewSelectionOpen(false)} onConfirm={confirmBrewSelection} recipes={library.recipes} selectedCoffeeBagId={coffeeBagId} selectedRecipeId={recipe.id} /> : null}
-    {brewFocusOpen && guided.prepStage ? <PreparationFocus fullscreenActive={brewFocusFullscreenActive} stage={guided.prepStage} message={guided.message} recipe={recipe} coffeeBag={coffeeBag} usableUpper={usableScale(device.liveTelemetry?.scales.upper)} usableLower={usableScale(device.liveTelemetry?.scales.lower)} onClose={closePreparationFocus} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} traceBuffer={guided.traceBuffer!} milestones={focusMilestones} /> : null}
-    {brewFocusOpen && !guided.prepStage && (activeBrew || guided.status === 'complete') ? <ActiveBrewSummary elapsed={guided.elapsed} fullscreenActive={brewFocusFullscreenActive} machine={guided.machine} message={guided.message} milestones={focusMilestones} mode={guided.machine.mode} onEnd={guided.finish} onExit={() => closeBrewFocus(false)} onPauseResume={guided.pauseResume} onToggleSound={toggleSound} recipe={recipe} schedule={guided.schedule} sound={sound} status={guided.status} telemetry={device.liveTelemetry} traceBuffer={guided.traceBuffer!} /> : null}
+    {brewFocusOpen && guided.prepStage ? <PreparationFocus dark={dark} fullscreenActive={brewFocusFullscreenActive} stage={guided.prepStage} message={guided.message} recipe={recipe} coffeeBag={coffeeBag} usableUpper={usableScale(device.liveTelemetry?.scales.upper)} usableLower={usableScale(device.liveTelemetry?.scales.lower)} onClose={closePreparationFocus} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} traceBuffer={guided.traceBuffer!} milestones={focusMilestones} /> : null}
+    {brewFocusOpen && !guided.prepStage && (activeBrew || guided.status === 'complete') ? <ActiveBrewSummary dark={dark} elapsed={guided.elapsed} fullscreenActive={brewFocusFullscreenActive} machine={guided.machine} message={guided.message} milestones={focusMilestones} mode={guided.machine.mode} onEnd={guided.finish} onExit={() => closeBrewFocus(false)} onPauseResume={guided.pauseResume} onToggleSound={toggleSound} recipe={recipe} schedule={guided.schedule} sound={sound} status={guided.status} telemetry={device.liveTelemetry} traceBuffer={guided.traceBuffer!} /> : null}
   </main>
 }
 

@@ -119,7 +119,7 @@ export function traceColumns(samples: BrewTraceSample[]) {
   return columns
 }
 
-function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant): uPlot.Plugin {
+function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant, theme: 'light' | 'dark'): uPlot.Plugin {
   return {
     hooks: {
       draw: [(plot) => {
@@ -132,7 +132,9 @@ function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds
           if (x < bbox.left || x > bbox.left + bbox.width) continue
           const imminent = milestoneIsImminent(milestone, getElapsedSeconds())
           const markerColor = variant === 'backdrop'
-            ? imminent ? 'rgba(123, 215, 150, .96)' : 'rgba(174, 179, 170, .38)'
+            ? theme === 'light'
+              ? imminent ? 'rgba(22, 101, 52, .94)' : 'rgba(22, 101, 52, .52)'
+              : imminent ? 'rgba(123, 215, 150, .96)' : 'rgba(174, 179, 170, .38)'
             : milestone.kind === 'coffee' ? cssColor('--app-muted', '#76706b') : cssColor('--app-accent', '#9c4d25')
           ctx.strokeStyle = markerColor
           ctx.fillStyle = ctx.strokeStyle
@@ -146,13 +148,6 @@ function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds
             }
           }
           if (variant === 'backdrop') {
-            ctx.globalAlpha = imminent ? 1 : .48
-            ctx.fillStyle = imminent ? '#d8f5df' : 'rgba(174, 179, 170, .82)'
-            ctx.font = `${imminent ? '700' : '600'} ${imminent ? '11' : '9'}px Inter, ui-sans-serif, system-ui, sans-serif`
-            const labelX = Math.max(bbox.left + 4, Math.min(x + 5, bbox.left + bbox.width - 70))
-            const labelY = bbox.top + 14 + (index % 2) * 13
-            ctx.fillText(milestone.label, labelX, labelY)
-            ctx.globalAlpha = 1
             continue
           }
           const width = Math.ceil(ctx.measureText(milestone.label).width) + 12
@@ -171,11 +166,11 @@ function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds
   }
 }
 
-function graphOptions(width: number, height: number, getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant, timeDomainSeconds?: number, weightDomainTargetGrams?: number): uPlot.Options {
+function graphOptions(width: number, height: number, getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant, theme: 'light' | 'dark', timeDomainSeconds?: number, weightDomainTargetGrams?: number): uPlot.Options {
   const value = (_plot: uPlot, raw: number | null) => raw == null ? '—' : `${raw.toFixed(1)} g`
-  const total = variant === 'backdrop' ? '#7bd796' : cssColor('--chart-total', '#512612')
-  const upper = variant === 'backdrop' ? '#8ac7df' : cssColor('--chart-upper', '#336b8e')
-  const lower = variant === 'backdrop' ? '#b2dfa8' : cssColor('--chart-lower', '#247a36')
+  const total = variant === 'backdrop' ? theme === 'light' ? '#267844' : '#7bd796' : cssColor('--chart-total', '#512612')
+  const upper = variant === 'backdrop' ? theme === 'light' ? '#28718b' : '#8ac7df' : cssColor('--chart-upper', '#336b8e')
+  const lower = variant === 'backdrop' ? theme === 'light' ? '#477f3c' : '#b2dfa8' : cssColor('--chart-lower', '#247a36')
   const axis = cssColor('--app-muted', '#76706b')
   const grid = cssColor('--app-line', '#dedbd8')
   return {
@@ -188,19 +183,22 @@ function graphOptions(width: number, height: number, getMilestones: () => BrewMi
     legend: { show: variant === 'card', live: true },
     series: [
       { label: 'Time', value: (_plot, raw) => raw == null ? '—' : `${raw.toFixed(1)} s` },
-      { label: 'Combined', paths: smoothPath, stroke: withAlpha(total, variant === 'backdrop' ? 0.92 : 0.92), fill: withAlpha(total, variant === 'backdrop' ? 0.18 : 0.12), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 3.2 : 2.3, spanGaps: false, points: { show: false }, value },
-      { label: 'Upper', paths: smoothPath, stroke: withAlpha(upper, variant === 'backdrop' ? 0.58 : 0.88), fill: withAlpha(upper, variant === 'backdrop' ? 0.07 : 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 1.8 : 1.8, spanGaps: false, points: { show: false }, value },
-      { label: 'Lower', paths: smoothPath, stroke: withAlpha(lower, variant === 'backdrop' ? 0.58 : 0.88), fill: withAlpha(lower, variant === 'backdrop' ? 0.07 : 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 1.8 : 1.8, spanGaps: false, points: { show: false }, value },
+      { label: 'Combined', paths: smoothPath, stroke: variant === 'backdrop' ? 'transparent' : withAlpha(total, 0.92), fill: variant === 'backdrop' ? 'transparent' : withAlpha(total, 0.12), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 0 : 2.3, spanGaps: false, points: { show: false }, value },
+      { label: 'Upper', paths: smoothPath, stroke: variant === 'backdrop' ? 'transparent' : withAlpha(upper, 0.88), fill: variant === 'backdrop' ? 'transparent' : withAlpha(upper, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 0 : 1.8, spanGaps: false, points: { show: false }, value },
+      { label: 'Lower', paths: smoothPath, stroke: variant === 'backdrop' ? 'transparent' : withAlpha(lower, 0.88), fill: variant === 'backdrop' ? 'transparent' : withAlpha(lower, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: variant === 'backdrop' ? 0 : 1.8, spanGaps: false, points: { show: false }, value },
     ],
-    axes: variant === 'backdrop' ? [] : [
+    axes: variant === 'backdrop' ? [
+      { show: false, grid: { show: false }, ticks: { show: false } },
+      { show: false, grid: { show: false }, ticks: { show: false } },
+    ] : [
       { label: 'Brew time (s)', stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid, width: 1 }, values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(tick < 10 ? 1 : 0)) },
       { label: 'Weight (g)', stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid, width: 1 }, values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(1)), size: 58 },
     ],
-    plugins: [milestonePlugin(getMilestones, getElapsedSeconds, variant)],
+    plugins: [milestonePlugin(getMilestones, getElapsedSeconds, variant, theme)],
   }
 }
 
-function tracePath(times: number[], values: Array<number | null>, minX: number, maxX: number, minY: number, maxY: number) {
+function tracePath(times: number[], values: Array<number | null>, minX: number, maxX: number, minY: number, maxY: number, width: number, height: number) {
   const xSpan = Math.max(1, maxX - minX)
   const ySpan = Math.max(1, maxY - minY)
   let path = ''
@@ -208,15 +206,15 @@ function tracePath(times: number[], values: Array<number | null>, minX: number, 
   for (let index = 0; index < times.length; index += 1) {
     const value = values[index]
     if (value == null || !Number.isFinite(value)) { drawing = false; continue }
-    const x = ((times[index] - minX) / xSpan) * 1000
-    const y = 560 - ((value - minY) / ySpan) * 520
+    const x = ((times[index] - minX) / xSpan) * width
+    const y = height - ((value - minY) / ySpan) * height
     path += `${drawing ? 'L' : 'M'}${x.toFixed(2)},${y.toFixed(2)}`
     drawing = true
   }
   return path
 }
 
-function traceAreaPath(times: number[], values: Array<number | null>, minX: number, maxX: number, minY: number, maxY: number) {
+function traceAreaPath(times: number[], values: Array<number | null>, minX: number, maxX: number, minY: number, maxY: number, width: number, height: number) {
   const xSpan = Math.max(1, maxX - minX)
   const ySpan = Math.max(1, maxY - minY)
   let path = ''
@@ -226,26 +224,26 @@ function traceAreaPath(times: number[], values: Array<number | null>, minX: numb
   for (let index = 0; index < times.length; index += 1) {
     const value = values[index]
     if (value == null || !Number.isFinite(value)) {
-      if (drawing) path += `L${lastX.toFixed(2)},560L${firstX.toFixed(2)},560Z`
+      if (drawing) path += `L${lastX.toFixed(2)},${height.toFixed(2)}L${firstX.toFixed(2)},${height.toFixed(2)}Z`
       drawing = false
       continue
     }
-    const x = ((times[index] - minX) / xSpan) * 1000
-    const y = 560 - ((value - minY) / ySpan) * 520
+    const x = ((times[index] - minX) / xSpan) * width
+    const y = height - ((value - minY) / ySpan) * height
     if (!drawing) {
       firstX = x
-      path += `M${x.toFixed(2)},560L${x.toFixed(2)},${y.toFixed(2)}`
+      path += `M${x.toFixed(2)},${height.toFixed(2)}L${x.toFixed(2)},${y.toFixed(2)}`
       drawing = true
     } else {
       path += `L${x.toFixed(2)},${y.toFixed(2)}`
     }
     lastX = x
   }
-  if (drawing) path += `L${lastX.toFixed(2)},560L${firstX.toFixed(2)},560Z`
+  if (drawing) path += `L${lastX.toFixed(2)},${height.toFixed(2)}L${firstX.toFixed(2)},${height.toFixed(2)}Z`
   return path
 }
 
-function TraceOverlay({ columns, variant, timeDomainSeconds, weightDomainTargetGrams }: { columns: GraphColumns; variant: BrewGraphVariant; timeDomainSeconds?: number; weightDomainTargetGrams?: number }) {
+function TraceOverlay({ columns, variant, timeDomainSeconds, weightDomainTargetGrams, frame }: { columns: GraphColumns; variant: BrewGraphVariant; timeDomainSeconds?: number; weightDomainTargetGrams?: number; frame: PlotFrame }) {
   const finiteValues: number[] = []
   for (const series of columns.slice(1)) for (const value of series) if (value != null && Number.isFinite(value)) finiteValues.push(value)
   if (!finiteValues.length || !columns[0].length) return null
@@ -256,11 +254,11 @@ function TraceOverlay({ columns, variant, timeDomainSeconds, weightDomainTargetG
   const targetDomain = weightDomainForTarget(columns, weightDomainTargetGrams)
   const padding = Math.max(2, (dataMax - dataMin) * 0.08)
   const [minY, maxY] = targetDomain ?? [Math.max(0, dataMin - padding), dataMax + padding]
-  return <svg aria-hidden="true" className={`brew-graph__trace brew-graph__trace--${variant}`} preserveAspectRatio="none" viewBox="0 0 1000 600">
-    {variant === 'backdrop' ? <path className="brew-graph__trace-area" d={traceAreaPath(columns[0], columns[1], minX, maxX, minY, maxY)} /> : null}
-    <path className="brew-graph__trace-total" d={tracePath(columns[0], columns[1], minX, maxX, minY, maxY)} />
-    <path className="brew-graph__trace-upper" d={tracePath(columns[0], columns[2], minX, maxX, minY, maxY)} />
-    <path className="brew-graph__trace-lower" d={tracePath(columns[0], columns[3], minX, maxX, minY, maxY)} />
+  return <svg aria-hidden="true" className={`brew-graph__trace brew-graph__trace--${variant}`} style={{ bottom: 'auto', height: frame.height, left: frame.left, right: 'auto', top: frame.top, width: frame.width }} viewBox={`0 0 ${frame.width} ${frame.height}`}>
+    {variant === 'backdrop' ? <path className="brew-graph__trace-area" d={traceAreaPath(columns[0], columns[1], minX, maxX, minY, maxY, frame.width, frame.height)} /> : null}
+    <path className="brew-graph__trace-total" d={tracePath(columns[0], columns[1], minX, maxX, minY, maxY, frame.width, frame.height)} vectorEffect="non-scaling-stroke" />
+    <path className="brew-graph__trace-upper" d={tracePath(columns[0], columns[2], minX, maxX, minY, maxY, frame.width, frame.height)} vectorEffect="non-scaling-stroke" />
+    <path className="brew-graph__trace-lower" d={tracePath(columns[0], columns[3], minX, maxX, minY, maxY, frame.width, frame.height)} vectorEffect="non-scaling-stroke" />
   </svg>
 }
 
@@ -278,9 +276,17 @@ interface BrewGraphProps {
   weightDomainTargetGrams?: number
   /** Current session time; scheduled focus markers become prominent in the cue window. */
   elapsedSeconds?: number
+  theme?: 'light' | 'dark'
 }
 
-export function BrewGraph({ source, samples, milestones, emptyMessage = 'The graph begins automatically when Bloom starts.', compact = false, variant = 'card', decorative = false, timeDomainSeconds, weightDomainTargetGrams, elapsedSeconds }: BrewGraphProps) {
+interface PlotFrame {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+export function BrewGraph({ source, samples, milestones, emptyMessage = 'The graph begins automatically when Bloom starts.', compact = false, variant = 'card', decorative = false, timeDomainSeconds, weightDomainTargetGrams, elapsedSeconds, theme = 'dark' }: BrewGraphProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const plotRef = useRef<uPlot | null>(null)
   const columnsRef = useRef<GraphColumns>(samples ? traceColumns(samples) : source ? traceColumns(source.samples()) : emptyColumns())
@@ -290,19 +296,27 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
   const resizeFrameRef = useRef<number | null>(null)
   const [empty, setEmpty] = useState(!hasPlottableValues(columnsRef.current))
   const [renderColumns, setRenderColumns] = useState<GraphColumns>(() => copyColumns(columnsRef.current))
+  const [plotFrame, setPlotFrame] = useState<PlotFrame>({ left: 0, top: 0, width: 0, height: 0 })
   milestonesRef.current = milestones
   elapsedSecondsRef.current = elapsedSeconds
 
   const syncRenderedColumns = useCallback(() => setRenderColumns(copyColumns(columnsRef.current)), [])
   const plotColumns = useCallback(() => plottableColumns(columnsWithinTimeDomain(columnsRef.current, timeDomainSeconds)), [timeDomainSeconds])
+  const syncPlotFrame = useCallback(() => {
+    const plot = plotRef.current
+    if (!plot) return
+    const nextFrame = { left: plot.bbox.left, top: plot.bbox.top, width: plot.bbox.width, height: plot.bbox.height }
+    setPlotFrame((current) => current.left === nextFrame.left && current.top === nextFrame.top && current.width === nextFrame.width && current.height === nextFrame.height ? current : nextFrame)
+  }, [])
 
   const updatePlot = useCallback(() => {
     if (frameRef.current != null) return
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = null
       plotRef.current?.setData(plotColumns())
+      syncPlotFrame()
     })
-  }, [plotColumns])
+  }, [plotColumns, syncPlotFrame])
 
   useEffect(() => {
     const host = hostRef.current
@@ -315,13 +329,17 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
     // Start with a valid two-point shape, then hydrate it from the source or
     // saved samples in the data effects below. This avoids relying on the
     // first render's columns when a history trace arrives asynchronously.
-    plotRef.current = new uPlot(graphOptions(initialSize.width, initialSize.height, () => milestonesRef.current, () => elapsedSecondsRef.current, variant, timeDomainSeconds, weightDomainTargetGrams), placeholderColumns, host)
+    plotRef.current = new uPlot(graphOptions(initialSize.width, initialSize.height, () => milestonesRef.current, () => elapsedSecondsRef.current, variant, theme, timeDomainSeconds, weightDomainTargetGrams), placeholderColumns, host)
+    syncPlotFrame()
     const observer = new ResizeObserver(() => {
       if (resizeFrameRef.current != null) return
       resizeFrameRef.current = requestAnimationFrame(() => {
         resizeFrameRef.current = null
         const nextSize = size()
-        if (plotRef.current && (plotRef.current.width !== nextSize.width || plotRef.current.height !== nextSize.height)) plotRef.current.setSize(nextSize)
+        if (plotRef.current && (plotRef.current.width !== nextSize.width || plotRef.current.height !== nextSize.height)) {
+          plotRef.current.setSize(nextSize)
+          syncPlotFrame()
+        }
       })
     })
     observer.observe(host)
@@ -331,7 +349,7 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
       if (resizeFrameRef.current != null) cancelAnimationFrame(resizeFrameRef.current)
       plotRef.current?.destroy(); plotRef.current = null
     }
-  }, [compact, timeDomainSeconds, variant, weightDomainTargetGrams])
+  }, [compact, syncPlotFrame, theme, timeDomainSeconds, variant, weightDomainTargetGrams])
 
   useEffect(() => {
     if (!samples) return
@@ -357,13 +375,13 @@ export function BrewGraph({ source, samples, milestones, emptyMessage = 'The gra
       syncRenderedColumns()
       updatePlot()
     })
-  }, [source, syncRenderedColumns, updatePlot])
+  }, [source, syncRenderedColumns, theme, updatePlot])
 
   useEffect(() => { plotRef.current?.redraw() }, [elapsedSeconds, milestones])
 
   return <div aria-hidden={decorative || undefined} className={`${compact ? 'brew-graph brew-graph--compact' : 'brew-graph'}${variant === 'backdrop' ? ' brew-graph--backdrop' : ''}`}>
     {variant === 'card' ? <div className="brew-graph__milestones" aria-label="Brew milestones">{milestones.map((milestone) => <span className={`brew-graph__milestone brew-graph__milestone--${milestone.kind}`} key={milestone.id}>{milestone.label}</span>)}</div> : null}
-    <div className="brew-graph__drawing"><div aria-label={decorative ? undefined : 'Brew weight graph with recipe milestones'} className="brew-graph__plot" ref={hostRef} role={decorative ? undefined : 'img'} /><TraceOverlay columns={columnsWithinTimeDomain(renderColumns, timeDomainSeconds)} timeDomainSeconds={timeDomainSeconds} variant={variant} weightDomainTargetGrams={weightDomainTargetGrams} /></div>
+    <div className="brew-graph__drawing"><div aria-label={decorative ? undefined : 'Brew weight graph with recipe milestones'} className="brew-graph__plot" ref={hostRef} role={decorative ? undefined : 'img'} />{plotFrame.width > 0 && plotFrame.height > 0 ? <TraceOverlay columns={columnsWithinTimeDomain(renderColumns, timeDomainSeconds)} frame={plotFrame} timeDomainSeconds={timeDomainSeconds} variant={variant} weightDomainTargetGrams={weightDomainTargetGrams} /> : null}</div>
     {empty ? <p className="brew-graph__empty">{emptyMessage}</p> : null}
   </div>
 }
