@@ -3,7 +3,7 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import type { BrewRecipe, BrewStep, StepTransition } from './brewTypes'
 import type { BrewTraceBuffer, BrewTraceBufferEvent, BrewTraceSample } from './trace'
-import { cssColor, withAlpha } from './chartTheme'
+import { cssColor, displayP3Color, withAlpha } from './chartTheme'
 import { stepCueLeadSeconds } from './brew'
 
 type GraphColumns = [number[], Array<number | null>, Array<number | null>, Array<number | null>]
@@ -133,9 +133,9 @@ function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds
           const imminent = milestoneIsImminent(milestone, getElapsedSeconds())
           const markerColor = variant === 'backdrop'
             ? theme === 'light'
-              ? imminent ? 'rgba(22, 101, 52, .94)' : 'rgba(22, 101, 52, .52)'
-              : imminent ? 'rgba(123, 215, 150, .96)' : 'rgba(174, 179, 170, .38)'
-            : milestone.kind === 'coffee' ? cssColor('--app-muted', '#76706b') : cssColor('--app-accent', '#9c4d25')
+              ? imminent ? displayP3Color([0, 0.565, 0.275], [0, 142, 73], 0.94) : displayP3Color([0, 0.565, 0.275], [0, 142, 73], 0.52)
+              : imminent ? displayP3Color([0.3, 0.97, 0.49], [77, 247, 125], 0.96) : displayP3Color([0.67, 0.76, 0.7], [171, 194, 179], 0.38)
+            : milestone.kind === 'coffee' ? cssColor('--app-muted', 'rgba(76, 96, 84, 1)') : cssColor('--app-accent', 'rgba(0, 142, 73, 1)')
           ctx.strokeStyle = markerColor
           ctx.fillStyle = ctx.strokeStyle
           ctx.setLineDash([4, 4])
@@ -157,7 +157,7 @@ function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds
           ctx.fillStyle = cssColor('--app-surface', '#fff')
           ctx.fillRect(labelX, labelY, width, 16)
           ctx.globalAlpha = 1
-          ctx.fillStyle = milestone.kind === 'coffee' ? cssColor('--app-muted', '#76706b') : cssColor('--app-accent', '#9c4d25')
+          ctx.fillStyle = milestone.kind === 'coffee' ? cssColor('--app-muted', 'rgba(76, 96, 84, 1)') : cssColor('--app-accent', 'rgba(0, 142, 73, 1)')
           ctx.fillText(milestone.label, labelX + 6, labelY + 12)
         }
         ctx.restore()
@@ -168,11 +168,11 @@ function milestonePlugin(getMilestones: () => BrewMilestone[], getElapsedSeconds
 
 function graphOptions(width: number, height: number, getMilestones: () => BrewMilestone[], getElapsedSeconds: () => number | undefined, variant: BrewGraphVariant, theme: 'light' | 'dark', timeDomainSeconds?: number, weightDomainTargetGrams?: number): uPlot.Options {
   const value = (_plot: uPlot, raw: number | null) => raw == null ? '—' : `${raw.toFixed(1)} g`
-  const total = variant === 'backdrop' ? theme === 'light' ? '#267844' : '#7bd796' : cssColor('--chart-total', '#512612')
-  const upper = variant === 'backdrop' ? theme === 'light' ? '#28718b' : '#8ac7df' : cssColor('--chart-upper', '#336b8e')
-  const lower = variant === 'backdrop' ? theme === 'light' ? '#477f3c' : '#b2dfa8' : cssColor('--chart-lower', '#247a36')
-  const axis = cssColor('--app-muted', '#76706b')
-  const grid = cssColor('--app-line', '#dedbd8')
+  const total = variant === 'backdrop' ? theme === 'light' ? displayP3Color([0, 0.58, 0.28], [0, 145, 74]) : displayP3Color([0.3, 0.97, 0.49], [77, 247, 125]) : cssColor('--chart-total', 'rgba(255, 105, 20, 1)')
+  const upper = variant === 'backdrop' ? theme === 'light' ? displayP3Color([0.03, 0.47, 0.96], [0, 120, 244]) : displayP3Color([0.34, 0.52, 1], [87, 132, 255]) : cssColor('--chart-upper', 'rgba(99, 56, 255, 1)')
+  const lower = variant === 'backdrop' ? theme === 'light' ? displayP3Color([0.08, 0.69, 0.31], [0, 176, 77]) : displayP3Color([0.63, 0.9, 0.63], [161, 229, 161]) : cssColor('--chart-lower', 'rgba(0, 188, 78, 1)')
+  const axis = cssColor('--app-muted', 'rgba(76, 96, 84, 1)')
+  const grid = cssColor('--app-line', 'rgba(15, 22, 18, 0.12)')
   return {
     width, height,
     scales: {

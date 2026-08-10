@@ -97,6 +97,7 @@ const char *contentTypeForPath(const char *path) {
   if (endsWithIgnoreCase(path, ".webmanifest")) return "application/manifest+json";
   if (endsWithIgnoreCase(path, ".svg")) return "image/svg+xml";
   if (endsWithIgnoreCase(path, ".woff2")) return "font/woff2";
+  if (endsWithIgnoreCase(path, ".wav")) return "audio/wav";
   if (endsWithIgnoreCase(path, ".png")) return "image/png";
   if (endsWithIgnoreCase(path, ".jpg") || endsWithIgnoreCase(path, ".jpeg")) return "image/jpeg";
   if (endsWithIgnoreCase(path, ".webp")) return "image/webp";

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react'
-import { ArrowDownTrayIcon as Download, ArrowPathIcon as RefreshCw, ArrowUturnLeftIcon as RotateCcw, ArrowUpTrayIcon as FileUp, ArrowsPointingInIcon as Minimize2, ArrowsPointingOutIcon as Maximize2, BeakerIcon as Coffee, BookOpenIcon as BookOpen, BookmarkSquareIcon as Save, CheckCircleIcon as CheckCircle2, ChevronRightIcon as ChevronRight, ClockIcon as Clock3, ClockIcon as History, Cog6ToothIcon as Settings, MoonIcon as Moon, PauseIcon as Pause, PencilIcon as Pencil, PlayIcon as Play, ScaleIcon as Scale, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StarIcon as Star, StopIcon as Square, SunIcon as Sun, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { ArrowDownTrayIcon as Download, ArrowPathIcon as RefreshCw, ArrowUturnLeftIcon as RotateCcw, ArrowUpTrayIcon as FileUp, ArrowsPointingInIcon as Minimize2, ArrowsPointingOutIcon as Maximize2, BeakerIcon as Coffee, BookOpenIcon as BookOpen, BookmarkSquareIcon as Save, CheckCircleIcon as CheckCircle2, ChevronRightIcon as ChevronRight, ClockIcon as Clock3, ClockIcon as History, Cog6ToothIcon as Settings, MoonIcon as Moon, PauseIcon as Pause, PencilIcon as Pencil, PlayIcon as Play, ScaleIcon as Scale, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StarIcon as Star, StopIcon as Square, SunIcon as Sun, TrashIcon as Trash2 } from '@heroicons/react/24/solid'
 import { createPortal } from 'react-dom'
 import { ActiveBrewSummary } from './ActiveBrewSummary'
 import { setAudioEnabled } from './audio'
@@ -18,6 +18,7 @@ import type { BrewTraceBuffer, BrewTraceSample } from './trace'
 import type { DeviceTelemetry, MeasurementTelemetry, ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
 import { usableScale, useDevice, type BrowserNetworkState, type ConnectionState, type DeviceAvailability } from './useDevice'
 import { useGuidedBrew } from './useGuidedBrew'
+import { Button, EmptyState, LibraryItemCard, Modal, PageHeader, SectionHeader } from './ui'
 import { WeightCapture } from './WeightCapture'
 
 interface ScalePanelProps {
@@ -221,7 +222,7 @@ function ScalePanel({ id, label, scale, measurement, onTare, onCalibrate, comman
     <section className="scale-panel" aria-labelledby={`${id}-heading`}>
       <TickRail />
       <div className="scale-panel__content">
-        <h2 id={`${id}-heading`}>{label}</h2>
+        <h2 className="metric-title metric-title--panel" id={`${id}-heading`}>{label}</h2>
         <div className={unavailable ? 'weight weight--unavailable' : 'weight'} aria-live="polite">
           <span>{weight}</span>
           {!unavailable ? <small>g</small> : null}
@@ -231,12 +232,12 @@ function ScalePanel({ id, label, scale, measurement, onTare, onCalibrate, comman
           <span>Raw</span> {raw}
         </p>
         <div className="scale-actions">
-          <button className="button button--primary" disabled={!commandsEnabled || unavailable || scale?.calibrating} onClick={tare}>
+          <Button disabled={!commandsEnabled || unavailable || scale?.calibrating} onClick={tare} surface="device">
             Tare
-          </button>
-          <button className="button button--secondary" disabled={!commandsEnabled || unavailable || scale?.calibrating} onClick={() => onCalibrate(id)}>
+          </Button>
+          <Button disabled={!commandsEnabled || unavailable || scale?.calibrating} onClick={() => onCalibrate(id)} surface="device" variant="secondary">
             {scale?.calibrating ? 'Calibrating…' : 'Calibrate'}
-          </button>
+          </Button>
         </div>
         <p className="action-message" role="status">{actionMessage}</p>
       </div>
@@ -297,14 +298,14 @@ function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onC
         <div className="total-weight__heading">
           <div>
             <p className="eyebrow">Combined measurement</p>
-            <h2 id="total-weight-heading">Total Weight</h2>
+            <h2 className="metric-title metric-title--summary" id="total-weight-heading">Total Weight</h2>
           </div>
           <span className={total?.partial ? 'total-source total-source--partial' : 'total-source'}>{sourceLabel}</span>
         </div>
         <div className="total-tare">
-          <button className="button button--primary" disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button">
+          <Button disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} surface="device" type="button">
             {dualTare.busy ? 'Taring both…' : 'Tare both scales'}
-          </button>
+          </Button>
           <span role="status">{dualTare.message}</span>
         </div>
         <div className={hasReading ? 'total-weight__value' : 'total-weight__value total-weight__value--unavailable'} aria-live="polite">
@@ -377,36 +378,6 @@ function TotalWeightSection({ total, upper, lower, measurement, onSetTarget, onC
   )
 }
 
-interface ModalProps {
-  title: string
-  children: ReactNode
-  onClose: () => void
-}
-
-function Modal({ title, children, onClose }: ModalProps) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
-
-  return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <header className="modal__header">
-          <h2 id="modal-title">{title}</h2>
-          <button className="icon-button" aria-label="Close" onClick={onClose}>
-            <X />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  )
-}
-
 interface CalibrationModalProps {
   channel: ScaleId
   onClose: () => void
@@ -466,9 +437,9 @@ function CalibrationModal({ channel, onClose, onSubmit }: CalibrationModalProps)
         </div>
         <small className="form-hint">For example: enter 1000 g or 1 kg for a one-kilogram reference.</small>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <button className="button button--primary button--full" disabled={submitting} type="submit">
+        <Button disabled={submitting} fullWidth surface="device" type="submit">
           {submitting ? 'Starting…' : 'Start calibration'}
-        </button>
+        </Button>
       </form>
     </Modal>
   )
@@ -505,7 +476,7 @@ function SettingsModal({ currentSsid, onClose, onSaveWifi }: SettingsModalProps)
         <label htmlFor="wifi-password">Password</label>
         <input id="wifi-password" maxLength={64} onChange={(event) => setPassword(event.target.value)} type="password" value={password} />
         {status ? <p className="form-status" role="status">{status}</p> : null}
-        <button className="button button--primary button--full" type="submit">Save Wi-Fi</button>
+        <Button fullWidth surface="device" type="submit">Save Wi-Fi</Button>
       </form>
     </Modal>
   )
@@ -565,14 +536,17 @@ function DeviceWorkspace({ telemetry, connection, availability, lastUpdateAt, se
 
   return (
     <div className="device-workspace">
-      <div className="device-workspace__heading">
-        <div><p className="brew-eyebrow">Device</p><h2>Scale and connectivity</h2></div>
-        <div className="header-status">
+      <PageHeader
+        actions={<div className="header-status">
           <span className="hostname">pourframe.local</span>
           <span className={online ? 'connection connection--online' : 'connection connection--offline'}><i /> {availability === 'partial' ? 'One scale unavailable' : online ? 'Device online' : connection === 'connecting' ? 'Connecting' : availability === 'stale' ? 'Telemetry degraded' : 'Device offline'}</span>
-        <button className="settings-button" disabled={!commandsEnabled} onClick={() => setSettingsOpen(true)}><Settings /> Wi-Fi</button>
-        </div>
-      </div>
+          <button className="settings-button" disabled={!commandsEnabled} onClick={() => setSettingsOpen(true)}><Settings /> Wi-Fi</button>
+        </div>}
+        className="device-workspace__heading"
+        eyebrow="Device"
+        title="Scale and connectivity"
+        variant="compact"
+      />
       <TotalWeightSection
         commandsEnabled={commandsEnabled}
         dualTare={dualTare}
@@ -798,11 +772,11 @@ function PreparationFocus({ stage, message, recipe, coffeeBag, usableUpper, usab
           <label className="prep-check"><input checked={coffeeReady} onChange={(event) => setCoffeeReady(event.target.checked)} type="checkbox" /><span>Dry coffee and dripper are positioned on the upper scale.</span></label>
           <label className="prep-check"><input checked={carafeReady} onChange={(event) => setCarafeReady(event.target.checked)} type="checkbox" /><span>The empty carafe is positioned on the lower scale.</span></label>
           <div className="prep-health" aria-label="Scale availability"><span className={usableUpper ? 'ok' : 'warn'}>Upper {usableUpper ? 'ready' : 'unavailable'}</span><span className={usableLower ? 'ok' : 'warn'}>Lower {usableLower ? 'ready' : 'unavailable'}</span></div>
-          <button className="button button--primary button--full" disabled={!coffeeReady || !carafeReady || (lowStock && !lowStockConfirmed)} onClick={onPrepare}>Tare and prepare</button>
+          <Button disabled={!coffeeReady || !carafeReady || (lowStock && !lowStockConfirmed)} fullWidth onClick={onPrepare} surface="device">Tare and prepare</Button>
         </> : null}
         {stage === 'working' ? <div className="prep-working"><span className="spinner" /><strong>Preparing PourFrame</strong><p>{message}</p></div> : null}
-        {stage === 'ready' ? <div className="prep-decision"><strong>Everything is ready</strong><p>{message}</p><p>The timer starts immediately when you press Start brew.</p><button className="button button--primary button--full" onClick={onStart}><Play aria-hidden="true" />Start brew</button></div> : null}
-        {stage === 'timer' ? <div className="prep-decision" role="alert"><strong>Use timer-only mode?</strong><p>{message}</p><p>No live weights or sensor confidence will be recorded.</p><button className="button button--primary button--full" onClick={onStartTimer}>Start timer only</button><button className="button button--secondary button--full" onClick={exit}>Cancel</button></div> : null}
+        {stage === 'ready' ? <div className="prep-decision"><strong>Everything is ready</strong><p>{message}</p><p>The timer starts immediately when you press Start brew.</p><Button fullWidth onClick={onStart} surface="device"><Play aria-hidden="true" />Start brew</Button></div> : null}
+        {stage === 'timer' ? <div className="prep-decision" role="alert"><strong>Use timer-only mode?</strong><p>{message}</p><p>No live weights or sensor confidence will be recorded.</p><Button fullWidth onClick={onStartTimer} surface="device">Start timer only</Button><Button fullWidth onClick={exit} surface="device" variant="secondary">Cancel</Button></div> : null}
         </div>
       </div>
     </div>, document.body,
@@ -818,7 +792,7 @@ function LiveReadings({ telemetry, target, stepTarget, flowTarget, mode, relativ
   const remaining = stepWaterAdded == null ? null : stepTarget - stepWaterAdded
   const warning = mode === 'timer_only' ? 'Timer-only · scale data unavailable' : phase === 'WAITING_FOR_STABLE_BASELINE' ? 'Waiting for synchronized scale data.' : telemetry?.total.partial ? 'Partial measurement · reduced confidence' : !liveScaleTelemetry(telemetry) ? 'Scale connection unavailable' : !completePairedTelemetry(telemetry) ? 'Waiting for synchronized scale data.' : null
   return <section className={warning ? 'brew-readings brew-readings--warning' : 'brew-readings'} aria-label="Live brew readings">
-    <div className="brew-readings__tools"><strong>Brew readings</strong><button className="brew-secondary" disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button">{dualTare.busy ? 'Taring…' : 'Tare both scales'}</button></div>
+    <div className="brew-readings__tools"><strong>Brew readings</strong><Button disabled={!dualTare.enabled || dualTare.busy} onClick={() => void dualTare.tareBoth()} type="button" variant="secondary">{dualTare.busy ? 'Taring…' : 'Tare both scales'}</Button></div>
     {dualTare.message ? <p className="dual-tare-message" role="status">{dualTare.message}</p> : null}
     <div className="brew-readings__primary"><span>Current step water</span><strong>{stepWaterAdded == null ? '—' : `${formatWeight(stepWaterAdded)} g`}</strong><small>{remaining == null ? `Step target ${formatRecipeWeight(stepTarget)} g` : remaining > 0 ? `${formatWeight(remaining)} g remaining` : `${formatWeight(Math.abs(remaining))} g over target`}</small></div>
     <dl><div><dt>Cumulative water</dt><dd>{total == null ? '—' : `${formatWeight(total)} g`}</dd><small>Target {formatRecipeWeight(target)} g</small></div><div><dt>Dripper absolute</dt><dd>{upper == null ? '—' : `${formatWeight(upper)} g`}</dd><small>Relative {mode === 'device' && relative.relativeUpper != null ? `${formatWeight(relative.relativeUpper)} g` : '—'}</small></div><div><dt>Final beverage weight</dt><dd>{lower == null ? '—' : `${formatWeight(lower)} g`}</dd><small>Measured on lower scale</small></div><div><dt>Pour rate</dt><dd>{measuredRate == null ? '—' : `${formatWeight(measuredRate)} g/s`}</dd><small>Guidance {formatRecipeWeight(flowTarget)} g/s{measuredRate == null ? '' : ` · ${measuredRate >= flowTarget ? '+' : ''}${formatWeight(measuredRate - flowTarget)} g/s`}</small></div></dl>
@@ -864,23 +838,23 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
   const selectedBag = coffeeBags.find((bag) => bag.id === coffeeBagId) ?? null
   return <div className="brew-layout">
     <section className="brew-hero" aria-labelledby="brew-title">
-      <div className="brew-hero__copy"><p className="brew-eyebrow">Guided brew</p><h2 id="brew-title">{recipe.name}</h2><label className="brew-coffee-select"><span>Coffee bag</span><select disabled={active} value={coffeeBagId ?? ''} onChange={(event) => onCoffeeBagChange(event.target.value || null)}><option value="">No coffee bag</option>{coffeeBags.map((bag) => <option key={bag.id} value={bag.id}>{bag.name} · {bag.roastery} · {formatRecipeWeight(bag.remainingWeightG)} g{bag.remainingWeightG <= 0 ? ' · depleted' : ''}</option>)}</select></label>{selectedBag ? <small className={selectedBag.remainingWeightG < recipe.coffee ? 'brew-coffee-stock brew-coffee-stock--warning' : 'brew-coffee-stock'}>{selectedBag.remainingWeightG < recipe.coffee ? 'Low tracked stock · confirmation required' : `${formatRecipeWeight(selectedBag.remainingWeightG)} g remaining`}</small> : null}</div>
+      <div className="brew-hero__copy"><p className="brew-eyebrow">Guided brew</p><h2 className="page-title page-title--default" id="brew-title">{recipe.name}</h2><label className="brew-coffee-select"><span>Coffee bag</span><select disabled={active} value={coffeeBagId ?? ''} onChange={(event) => onCoffeeBagChange(event.target.value || null)}><option value="">No coffee bag</option>{coffeeBags.map((bag) => <option key={bag.id} value={bag.id}>{bag.name} · {bag.roastery} · {formatRecipeWeight(bag.remainingWeightG)} g{bag.remainingWeightG <= 0 ? ' · depleted' : ''}</option>)}</select></label>{selectedBag ? <small className={selectedBag.remainingWeightG < recipe.coffee ? 'brew-coffee-stock brew-coffee-stock--warning' : 'brew-coffee-stock'}>{selectedBag.remainingWeightG < recipe.coffee ? 'Low tracked stock · confirmation required' : `${formatRecipeWeight(selectedBag.remainingWeightG)} g remaining`}</small> : null}</div>
       <div className="brew-timer"><span>{status === 'paused' ? 'Paused' : active ? step.name : status === 'complete' ? 'Complete' : 'Ready'}</span><strong>{formatTime(elapsed)}</strong><small>{formatTime(recipe.brewTime)} total</small></div>
       <dl className="brew-key-metrics"><div><dt>Coffee dose</dt><dd>{formatRecipeWeight(recipe.coffee)} g</dd></div><div><dt>Expected yield</dt><dd>{formatRecipeWeight(expectedRecipeYield(recipe))} g</dd><small>Coffee × ratio</small></div><div><dt>Brew time</dt><dd>{formatTime(recipe.brewTime)}</dd></div></dl>
       <div className="brew-actions">
-        {!active ? <button className="brew-primary" disabled={!canStartDevice} onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Prepare brew'}</button> : <button className="brew-primary" disabled={deviceBlocked && !canResumeDevice} onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{deviceBlocked && !canResumeDevice ? 'Waiting for device' : status === 'paused' ? 'Resume' : 'Pause'}</button>}
-        <button className="brew-secondary" disabled={elapsed === 0 && status === 'idle'} onClick={onReset}><RotateCcw aria-hidden="true" />Reset</button>
-        {active ? <button className="brew-secondary" onClick={onOpenFocus}><Maximize2 aria-hidden="true" />Full screen</button> : null}
-        {active ? <button className="brew-secondary" disabled={deviceBlocked} onClick={onManualAdvance}>Advance step</button> : null}
-        {(machine.phase === 'WAITING_FOR_STABLE_BASELINE' || deviceBlocked) && mode === 'device' ? <button className="brew-secondary" onClick={onTimerOnly}>Continue timer only</button> : null}
-        {active ? <button className="brew-secondary" onClick={onFinish}>Finish</button> : null}
+        {!active ? <Button disabled={!canStartDevice} onClick={onStart}><Play aria-hidden="true" />{status === 'complete' ? 'Brew again' : 'Prepare brew'}</Button> : <Button disabled={deviceBlocked && !canResumeDevice} onClick={onPause}>{status === 'paused' ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}{deviceBlocked && !canResumeDevice ? 'Waiting for device' : status === 'paused' ? 'Resume' : 'Pause'}</Button>}
+        <Button disabled={elapsed === 0 && status === 'idle'} onClick={onReset} variant="secondary"><RotateCcw aria-hidden="true" />Reset</Button>
+        {active ? <Button onClick={onOpenFocus} variant="secondary"><Maximize2 aria-hidden="true" />Full screen</Button> : null}
+        {active ? <Button disabled={deviceBlocked} onClick={onManualAdvance} variant="secondary">Advance step</Button> : null}
+        {(machine.phase === 'WAITING_FOR_STABLE_BASELINE' || deviceBlocked) && mode === 'device' ? <Button onClick={onTimerOnly} variant="secondary">Continue timer only</Button> : null}
+        {active ? <Button onClick={onFinish} variant="secondary">Finish</Button> : null}
       </div>
       <div className="brew-progress" role="progressbar" aria-label="Brew progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}><span style={{ width: `${progress * 100}%` }} /></div>
     </section>
     <LiveReadings telemetry={telemetry} target={step.cumulative} stepTarget={readingStep.pour} flowTarget={recipe.flowRate} mode={mode} relative={relative} phase={machine.phase} cue={cue} dualTare={dualTare} />
     {message ? <p className="brew-session-message" role="status">{message}</p> : null}
-    <section className="brew-graph-card" aria-labelledby="live-brew-graph-heading"><div className="section-heading"><div><p className="brew-eyebrow">Automatic recording</p><h3 id="live-brew-graph-heading">Live brew graph</h3></div><span>{mode === 'timer_only' ? 'Timer only' : status === 'brewing' ? 'Recording' : status === 'paused' ? 'Paused' : status === 'complete' ? 'Saved' : 'Ready'}</span></div><BrewGraph source={traceBuffer} milestones={brewMilestones(recipe, schedule, machine.transitions)} /></section>
-    <section className="brew-guide" aria-live="polite"><div className="brew-guide__current"><span>Current step · target {formatRecipeWeight(step.cumulative)} g</span><h3>{step.name}</h3><p>{step.instruction}</p>{next ? <div className="next-step"><span>Next</span><strong>{next.name} at {formatTime(next.start)}</strong><ChevronRight aria-hidden="true" /></div> : null}</div><ol className="brew-timeline">{schedule.map((item, itemIndex) => <li className={itemIndex < index ? 'done' : itemIndex === index ? 'active' : ''} key={item.id}><span>{itemIndex < index ? '✓' : itemIndex + 1}</span><div><strong>{item.name}</strong><small>{formatRecipeWeight(item.cumulative)} g · {formatTime(item.start)}</small></div></li>)}</ol></section>
+    <section className="brew-graph-card" aria-labelledby="live-brew-graph-heading"><SectionHeader className="brew-graph-card__header" eyebrow="Automatic recording" title="Live brew graph" titleId="live-brew-graph-heading" trailing={<span>{mode === 'timer_only' ? 'Timer only' : status === 'brewing' ? 'Recording' : status === 'paused' ? 'Paused' : status === 'complete' ? 'Saved' : 'Ready'}</span>} /><BrewGraph source={traceBuffer} milestones={brewMilestones(recipe, schedule, machine.transitions)} /></section>
+    <section className="brew-guide" aria-live="polite"><div className="brew-guide__current"><span>Current step · target {formatRecipeWeight(step.cumulative)} g</span><h3 className="guided-step-title">{step.name}</h3><p>{step.instruction}</p>{next ? <div className="next-step"><span>Next</span><strong>{next.name} at {formatTime(next.start)}</strong><ChevronRight aria-hidden="true" /></div> : null}</div><ol className="brew-timeline">{schedule.map((item, itemIndex) => <li className={itemIndex < index ? 'done' : itemIndex === index ? 'active' : ''} key={item.id}><span>{itemIndex < index ? '✓' : itemIndex + 1}</span><div><strong>{item.name}</strong><small>{formatRecipeWeight(item.cumulative)} g · {formatTime(item.start)}</small></div></li>)}</ol></section>
   </div>
 }
 
@@ -943,15 +917,15 @@ function RecipeWorkspace({ recipes, brews, onSelect, onSave, onDelete }: { recip
     finally { if (fileInput.current) fileInput.current.value = '' }
   }
   const numberField = (label: string, field: keyof BrewRecipe, step: number, suffix: string) => draft ? <label className="recipe-field"><span>{label}</span><div><input min="0" onChange={(event) => setDraft((current) => current ? updateRecipeNumber(current, field, Number(event.target.value)) : current)} step={step} type="number" value={formatRecipeInput(Number(draft[field]))} /><small>{suffix}</small></div></label> : null
-  const recipeCard = (recipe: BrewRecipe) => <article className="recipe-card" key={recipe.id}><button className="recipe-card__open" onClick={() => setSelectedId(recipe.id)} type="button"><strong>{recipe.name}</strong><span>{recipe.serveStyle === 'iced' ? 'Iced brew' : 'Hot brew'} · {recipe.dripper}</span><small>{formatRecipeWeight(recipe.coffee)} g coffee · {formatRecipeWeight(expectedRecipeYield(recipe))} g yield · {formatTime(recipe.brewTime)}</small></button><button aria-label={`${recipe.starred ? 'Unstar' : 'Star'} ${recipe.name}`} className={recipe.starred ? 'library-star active' : 'library-star'} onClick={() => void toggleStar(recipe)} type="button"><Star aria-hidden="true" /></button></article>
-  const group = (title: string, values: BrewRecipe[]) => values.length ? <section className="library-group"><h3>{title}<small>{values.length}</small></h3><div className="recipe-collection">{values.map(recipeCard)}</div></section> : null
+  const recipeCard = (recipe: BrewRecipe) => <LibraryItemCard className="recipe-card" key={recipe.id} label={recipe.name} onOpen={() => setSelectedId(recipe.id)} onToggleStar={() => void toggleStar(recipe)} openClassName="recipe-card__open" starred={recipe.starred}><strong className="card-title">{recipe.name}</strong><span>{recipe.serveStyle === 'iced' ? 'Iced brew' : 'Hot brew'} · {recipe.dripper}</span><small>{formatRecipeWeight(recipe.coffee)} g coffee · {formatRecipeWeight(expectedRecipeYield(recipe))} g yield · {formatTime(recipe.brewTime)}</small></LibraryItemCard>
+  const group = (title: string, values: BrewRecipe[]) => values.length ? <section className="library-group"><SectionHeader count={values.length} title={title} variant="compact" /><div className="recipe-collection">{values.map(recipeCard)}</div></section> : null
   return <section className="library-workspace recipe-library-workspace">
-    <header className="library-workspace__header"><div><p className="brew-eyebrow">Shared library</p><h2>Recipes</h2><p>Choose a trusted recipe, then send it to the brew dock.</p></div><div className="library-header-actions"><input accept="application/json,.json" aria-label="Import recipe" hidden onChange={(event) => void importRecipe(event.target.files?.[0])} ref={fileInput} type="file" /><button className="brew-secondary" onClick={() => fileInput.current?.click()} type="button"><FileUp aria-hidden="true" />Import</button><button className="new-recipe" onClick={() => setDraft({ ...defaultRecipes[0], id: createId('recipe'), name: 'New recipe', starred: false, serveStyle: 'hot' })}>New recipe</button></div></header>
+    <PageHeader actions={<div className="library-header-actions"><input accept="application/json,.json" aria-label="Import recipe" hidden onChange={(event) => void importRecipe(event.target.files?.[0])} ref={fileInput} type="file" /><Button onClick={() => fileInput.current?.click()} type="button" variant="secondary"><FileUp aria-hidden="true" />Import</Button><Button className="new-recipe" onClick={() => setDraft({ ...defaultRecipes[0], id: createId('recipe'), name: 'New recipe', starred: false, serveStyle: 'hot' })} variant="secondary">New recipe</Button></div>} description="Choose a trusted recipe, then send it to the brew dock." eyebrow="Shared library" title="Recipes" variant="library" />
     <div className="library-controls"><label><span>Serve</span><select onChange={(event) => setFilter(event.target.value as RecipeFilter)} value={filter}><option value="all">All recipes</option><option value="hot">Hot brew</option><option value="iced">Iced brew</option></select></label><label><span>Sort</span><select onChange={(event) => setSort(event.target.value as RecipeSort)} value={sort}><option value="name">Name A–Z</option><option value="dose">Coffee dose</option><option value="time">Brew time</option></select></label></div>
     {group('Starred', starred)}{group('Last brewed', recent)}{group('All recipes', all)}
-    {!visible.length ? <div className="bag-empty"><BookOpen aria-hidden="true" /><strong>No matching recipes</strong><span>Change the filter or add a new recipe.</span></div> : null}<p className="library-message" role="status">{message}</p>
-    {selected ? <Modal onClose={() => setSelectedId(null)} title={selected.name}><div className="library-modal__body"><div className="modal-toolbar"><button className={selected.starred ? 'library-star active' : 'library-star'} onClick={() => void toggleStar(selected)} type="button"><Star aria-hidden="true" />{selected.starred ? 'Starred' : 'Star'}</button><button onClick={() => setDraft(migrateRecipe(selected))} type="button"><Pencil aria-hidden="true" />Edit</button><button onClick={() => exportRecipe(selected)} type="button"><Download aria-hidden="true" />Export</button><button className="danger" onClick={() => void remove(selected)} type="button"><Trash2 aria-hidden="true" />Delete</button></div><dl className="library-detail"><div><dt>Serving</dt><dd>{selected.serveStyle === 'iced' ? 'Iced brew' : 'Hot brew'}</dd></div><div><dt>Brewer</dt><dd>{selected.dripper}</dd></div><div><dt>Coffee dose</dt><dd>{formatRecipeWeight(selected.coffee)} g</dd></div><div><dt>Expected yield</dt><dd>{formatRecipeWeight(expectedRecipeYield(selected))} g</dd></div><div><dt>Brew time</dt><dd>{formatTime(selected.brewTime)}</dd></div><div><dt>Temperature</dt><dd>{formatRecipeWeight(selected.temperature)} °C</dd></div><div><dt>Notes</dt><dd>{selected.notes || 'No notes'}</dd></div></dl><button className="brew-primary button--full" onClick={() => { onSelect(selected); setSelectedId(null) }} type="button">Use for next brew</button></div></Modal> : null}
-    {draft ? <Modal onClose={() => setDraft(null)} title={recipes.some((recipe) => recipe.id === draft.id) ? 'Edit recipe' : 'Recipe details'}><div className="library-modal__body recipe-edit-form"><label className="recipe-field recipe-field--wide"><span>Recipe name</span><input maxLength={80} onChange={(event) => setDraft({ ...draft, name: event.target.value })} value={draft.name} /></label><div className="recipe-metrics"><label><span>Coffee dose</span><div><input min="0.1" onChange={(event) => setDraft(updateRecipeNumber(draft, 'coffee', Number(event.target.value)))} step="0.5" type="number" value={formatRecipeInput(draft.coffee)} /><small>g</small></div></label><div className="recipe-metric-readonly"><span>Expected yield</span><strong>{formatRecipeWeight(expectedRecipeYield(draft))} g</strong><small>Coffee dose × ratio</small></div><label><span>Brew time</span><div><input min="90" onChange={(event) => setDraft(updateRecipeNumber(draft, 'brewTime', Number(event.target.value)))} step="5" type="number" value={formatRecipeInput(draft.brewTime)} /><small>{formatTime(draft.brewTime)}</small></div></label></div><label className="recipe-field"><span>Serving style</span><select onChange={(event) => setDraft({ ...draft, serveStyle: event.target.value as BrewRecipe['serveStyle'] })} value={draft.serveStyle}><option value="hot">Hot brew</option><option value="iced">Iced brew</option></select></label><div className="recipe-grid">{numberField('Total water', 'water', 1, 'g')}{numberField('Ratio', 'ratio', 0.1, ':1')}{numberField('Bloom', 'bloom', 1, 'g')}{numberField('Pours after bloom', 'poursAfterBloom', 1, '')}{numberField('Flow rate', 'flowRate', 0.1, 'g/s')}{numberField('Temperature', 'temperature', 1, '°C')}</div><label className="recipe-field recipe-field--wide"><span>Notes</span><textarea maxLength={500} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} value={draft.notes} /></label><button className="brew-primary button--full" onClick={() => void save()} type="button"><Save aria-hidden="true" />Save recipe</button></div></Modal> : null}
+    {!visible.length ? <EmptyState description="Change the filter or add a new recipe." icon={<BookOpen aria-hidden="true" />} title="No matching recipes" /> : null}<p className="library-message" role="status">{message}</p>
+    {selected ? <Modal onClose={() => setSelectedId(null)} title={selected.name}><div className="library-modal__body"><div className="modal-toolbar"><button className={selected.starred ? 'library-star active' : 'library-star'} onClick={() => void toggleStar(selected)} type="button"><Star aria-hidden="true" />{selected.starred ? 'Starred' : 'Star'}</button><button onClick={() => setDraft(migrateRecipe(selected))} type="button"><Pencil aria-hidden="true" />Edit</button><button onClick={() => exportRecipe(selected)} type="button"><Download aria-hidden="true" />Export</button><button className="danger" onClick={() => void remove(selected)} type="button"><Trash2 aria-hidden="true" />Delete</button></div><dl className="library-detail"><div><dt>Serving</dt><dd>{selected.serveStyle === 'iced' ? 'Iced brew' : 'Hot brew'}</dd></div><div><dt>Brewer</dt><dd>{selected.dripper}</dd></div><div><dt>Coffee dose</dt><dd>{formatRecipeWeight(selected.coffee)} g</dd></div><div><dt>Expected yield</dt><dd>{formatRecipeWeight(expectedRecipeYield(selected))} g</dd></div><div><dt>Brew time</dt><dd>{formatTime(selected.brewTime)}</dd></div><div><dt>Temperature</dt><dd>{formatRecipeWeight(selected.temperature)} °C</dd></div><div><dt>Notes</dt><dd>{selected.notes || 'No notes'}</dd></div></dl><Button fullWidth onClick={() => { onSelect(selected); setSelectedId(null) }} type="button">Use for next brew</Button></div></Modal> : null}
+    {draft ? <Modal onClose={() => setDraft(null)} title={recipes.some((recipe) => recipe.id === draft.id) ? 'Edit recipe' : 'Recipe details'}><div className="library-modal__body recipe-edit-form"><label className="recipe-field recipe-field--wide"><span>Recipe name</span><input maxLength={80} onChange={(event) => setDraft({ ...draft, name: event.target.value })} value={draft.name} /></label><div className="recipe-metrics"><label><span>Coffee dose</span><div><input min="0.1" onChange={(event) => setDraft(updateRecipeNumber(draft, 'coffee', Number(event.target.value)))} step="0.5" type="number" value={formatRecipeInput(draft.coffee)} /><small>g</small></div></label><div className="recipe-metric-readonly"><span>Expected yield</span><strong>{formatRecipeWeight(expectedRecipeYield(draft))} g</strong><small>Coffee dose × ratio</small></div><label><span>Brew time</span><div><input min="90" onChange={(event) => setDraft(updateRecipeNumber(draft, 'brewTime', Number(event.target.value)))} step="5" type="number" value={formatRecipeInput(draft.brewTime)} /><small>{formatTime(draft.brewTime)}</small></div></label></div><label className="recipe-field"><span>Serving style</span><select onChange={(event) => setDraft({ ...draft, serveStyle: event.target.value as BrewRecipe['serveStyle'] })} value={draft.serveStyle}><option value="hot">Hot brew</option><option value="iced">Iced brew</option></select></label><div className="recipe-grid">{numberField('Total water', 'water', 1, 'g')}{numberField('Ratio', 'ratio', 0.1, ':1')}{numberField('Bloom', 'bloom', 1, 'g')}{numberField('Pours after bloom', 'poursAfterBloom', 1, '')}{numberField('Flow rate', 'flowRate', 0.1, 'g/s')}{numberField('Temperature', 'temperature', 1, '°C')}</div><label className="recipe-field recipe-field--wide"><span>Notes</span><textarea maxLength={500} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} value={draft.notes} /></label><Button fullWidth onClick={() => void save()} type="button"><Save aria-hidden="true" />Save recipe</Button></div></Modal> : null}
   </section>
 }
 
@@ -984,20 +958,20 @@ function HistoryBrewItem({ brew }: { brew: BrewRecord }) {
     {expanded ? <div className="history-brew__graph">
       {!brew.trace?.available ? <p>This timer-only or legacy brew has no recorded scale graph.</p> : null}
       {traceState === 'loading' ? <p>Loading saved trace…</p> : null}
-      {traceState === 'error' ? <div className="history-trace-error"><p role="alert">{traceMessage}</p><button className="brew-secondary" onClick={() => void load()}>Retry</button></div> : null}
+      {traceState === 'error' ? <div className="history-trace-error"><p role="alert">{traceMessage}</p><Button onClick={() => void load()} variant="secondary">Retry</Button></div> : null}
       {traceState === 'ready' && samples ? <BrewGraph compact samples={samples} milestones={milestones} emptyMessage="This brew trace contains no plottable scale values." /> : null}
     </div> : null}
   </article>
 }
 
 function HistoryWorkspace({ brews, onClear }: { brews: BrewRecord[]; onClear: () => Promise<void> }) {
-  return <section className="history-workspace"><div className="section-heading"><div><p className="brew-eyebrow">Shared on PourFrame · latest five</p><h2>Brew history</h2></div><button className="brew-secondary" disabled={!brews.length} onClick={() => window.confirm('Clear all shared brew history?') && void onClear()}>Clear history</button></div>{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <div className="empty-history"><History aria-hidden="true" /><h3>Take PourFrame for its first brew</h3><p>Choose a recipe and coffee bag below, then prepare your first guided brew. Its result will be saved here.</p></div>}</section>
+  return <section className="history-workspace"><PageHeader actions={<Button disabled={!brews.length} onClick={() => window.confirm('Clear all shared brew history?') && void onClear()} variant="secondary">Clear history</Button>} eyebrow="Shared on PourFrame · latest five" title="Brew history" variant="compact" />{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <EmptyState description="Choose a recipe and coffee bag below, then prepare your first guided brew. Its result will be saved here." icon={<History aria-hidden="true" />} title="Take PourFrame for its first brew" variant="full" />}</section>
 }
 
 function BrewDock({ recipe, coffeeBag, disabled, onAction, action }: { recipe: BrewRecipe; coffeeBag: CoffeeBagRecord | null; disabled: boolean; onAction: () => void; action: 'prepare' | 'fullscreen' | 'resume' }) {
   const active = action !== 'prepare'
   const label = action === 'prepare' ? 'Prepare brew' : action === 'resume' ? 'Resume brew' : 'Full screen'
-  return <aside aria-label={active ? 'Active brew controls' : 'Next brew'} className="brew-dock"><div className="brew-dock__selection"><span>{active ? action === 'resume' ? 'Brew paused' : 'Brew in progress' : 'Next brew'}</span><strong>{recipe.name}</strong><small>{coffeeBag ? `${coffeeBag.name} · ${coffeeBag.roastery}` : 'No coffee bag selected'}</small></div><button className="brew-primary" disabled={disabled} onClick={onAction} type="button">{action === 'fullscreen' ? <Maximize2 aria-hidden="true" /> : <Play aria-hidden="true" />}{label}</button></aside>
+  return <aside aria-label={active ? 'Active brew controls' : 'Next brew'} className="brew-dock"><div className="brew-dock__selection"><span>{active ? action === 'resume' ? 'Brew paused' : 'Brew in progress' : 'Next brew'}</span><strong>{recipe.name}</strong><small>{coffeeBag ? `${coffeeBag.name} · ${coffeeBag.roastery}` : 'No coffee bag selected'}</small></div><Button disabled={disabled} onClick={onAction} type="button">{action === 'fullscreen' ? <Maximize2 aria-hidden="true" /> : <Play aria-hidden="true" />}{label}</Button></aside>
 }
 
 function DeviceStatusBanner({ availability, browserNetwork, reconnectAttempt, onReconnect }: {
@@ -1083,7 +1057,8 @@ function App() {
   useEffect(() => { storeValue(themePreferenceKey, themePreference) }, [themePreference])
   useEffect(() => {
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101110' : '#f7f7f5')
+    document.documentElement.dataset.splashTheme = dark ? 'dark' : 'light'
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#050f09' : '#fafdfa')
   }, [dark])
   useEffect(() => { storeValue('pourframe.lastRecipe', recipe.id) }, [recipe.id])
   useEffect(() => {

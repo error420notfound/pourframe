@@ -40,6 +40,7 @@ void testMimeTypes() {
          "web manifest MIME type");
   expect(strcmp(frontend_delivery::contentTypeForPath("/logo.svg"), "image/svg+xml") == 0, "SVG MIME type");
   expect(strcmp(frontend_delivery::contentTypeForPath("/font.woff2"), "font/woff2") == 0, "WOFF2 MIME type");
+  expect(strcmp(frontend_delivery::contentTypeForPath("/audio/tick.wav"), "audio/wav") == 0, "WAV MIME type");
 }
 
 void testCacheControl() {

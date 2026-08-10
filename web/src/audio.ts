@@ -1,7 +1,22 @@
-export type AudioCue = 'start' | 'pour' | 'complete' | 'tick'
+import completeSound from './assets/audio/complete.wav'
+import errorSound from './assets/audio/error.wav'
+import startSound from './assets/audio/start.wav'
+import tickSound from './assets/audio/tick.wav'
+
+export type AudioCue = 'start' | 'pour' | 'complete' | 'tick' | 'error'
+
+const cueUrls: Record<AudioCue, string> = {
+  start: startSound,
+  pour: startSound,
+  complete: completeSound,
+  tick: tickSound,
+  error: errorSound,
+}
+
 let audioContext: AudioContext | null = null
 let masterGain: GainNode | null = null
 let audioEnabled = true
+const cueBuffers = new Map<AudioCue, Promise<AudioBuffer>>()
 
 function ensureAudioGraph() {
   const AudioConstructor = window.AudioContext || window.webkitAudioContext
@@ -13,6 +28,17 @@ function ensureAudioGraph() {
     masterGain.connect(audioContext.destination)
   }
   return { context: audioContext, output: masterGain }
+}
+
+function loadCue(context: AudioContext, cue: AudioCue) {
+  let buffer = cueBuffers.get(cue)
+  if (!buffer) {
+    buffer = fetch(cueUrls[cue])
+      .then((response) => response.ok ? response.arrayBuffer() : Promise.reject(new Error(`Unable to load ${cue} sound`)))
+      .then((bytes) => context.decodeAudioData(bytes))
+    cueBuffers.set(cue, buffer)
+  }
+  return buffer
 }
 
 export function setAudioEnabled(enabled: boolean) {
@@ -31,19 +57,13 @@ export function playCue(cue: AudioCue) {
     if (!graph) return
     const { context, output } = graph
     if (context.state === 'suspended') void context.resume()
-    const frequencies = cue === 'complete' ? [523.25, 659.25, 783.99] : cue === 'pour' ? [880, 1174.66] : cue === 'tick' ? [1046.5] : [440, 659.25]
-    frequencies.forEach((frequency, index) => {
-      const oscillator = context.createOscillator()
-      const gain = context.createGain()
-      const start = context.currentTime + index * 0.045
-      oscillator.type = cue === 'complete' ? 'triangle' : 'sine'
-      oscillator.frequency.setValueAtTime(frequency, start)
-      gain.gain.setValueAtTime(0, start)
-      gain.gain.linearRampToValueAtTime(cue === 'tick' ? 0.04 : 0.07, start + 0.01)
-      gain.gain.exponentialRampToValueAtTime(0.001, start + (cue === 'tick' ? 0.16 : 0.65))
-      oscillator.connect(gain); gain.connect(output)
-      oscillator.start(start); oscillator.stop(start + 0.7)
-    })
+    void loadCue(context, cue).then((buffer) => {
+      if (!audioEnabled) return
+      const source = context.createBufferSource()
+      source.buffer = buffer
+      source.connect(output)
+      source.start()
+    }).catch(() => { /* Audio is progressive enhancement. */ })
   } catch { /* Audio is progressive enhancement. */ }
 }
 

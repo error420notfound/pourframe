@@ -5,8 +5,8 @@
   "start_url": "./#brew",
   "scope": "./",
   "display": "standalone",
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
+  "theme_color": "#fafdfa",
+  "background_color": "#fafdfa",
   "icons": [
     {
       "src": "./apple-touch-icon.png",

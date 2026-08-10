@@ -265,7 +265,7 @@ export function ActiveBrewSummary({
       {confirmingEnd ? <div className="active-brew-summary__confirm-backdrop">
         <section aria-labelledby="end-brew-title" aria-modal="true" className="active-brew-summary__confirm" ref={confirmRef} role="alertdialog">
           <span>End active brew</span>
-          <h2 id="end-brew-title">Save this brew now?</h2>
+          <h2 className="modal-title modal-title--confirmation" id="end-brew-title">Save this brew now?</h2>
           <p>The current timer, weights, and trace will be saved as an early completion.</p>
           <div>
             <button className="active-brew-summary__confirm-cancel" onClick={cancelEnd} ref={cancelEndRef} type="button">Keep brewing</button>

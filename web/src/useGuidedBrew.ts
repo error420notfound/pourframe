@@ -119,7 +119,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
       void sendOnce(`cue:${cueId}`, { command: 'brew_step_cue', cue_id: cueId, pulse_count: 5, interval_ms: 1000 })
         .catch((error: unknown) => { updatePhysicalCue('unavailable'); setMessage(error instanceof Error ? error.message : 'Physical cue unavailable') })
     }
-    for (let pulse = 0; pulse < 5; pulse += 1) countdownTimers.current.push(window.setTimeout(() => playCue('tick'), pulse * 1000))
+    playCue('tick')
     countdownTimers.current.push(window.setTimeout(() => { if (physicalCueRef.current === 'active') updatePhysicalCue('completed'); activate(index, transitionId, 'automatic') }, 5000))
   }, [activate, clearCountdown, connection, event, schedule, sendOnce, updatePhysicalCue])
 
@@ -204,7 +204,7 @@ export function useGuidedBrew(recipe: BrewRecipe, coffeeBag: CoffeeBag | null, t
     setPrepStage('working'); setMessage('Checking scale health and waiting for tare acknowledgements…')
     const result = await prepareDevice(connection, telemetry, recipe.water, sendCommand)
     setMessage(result.message)
-    if (result.kind === 'timer') { event({ type: 'ERROR', message: result.message }); setPrepStage('timer'); return }
+    if (result.kind === 'timer') { event({ type: 'ERROR', message: result.message }); playCue('error'); setPrepStage('timer'); return }
     event({ type: 'PREPARED', mode: 'device' }); setPrepStage('ready'); setMessage('PourFrame is ready. Start when you are ready to pour.'); saved.current = false; summary.current = newSensorSummary('device'); lastTelemetrySequence.current = null
   }, [coffeeBag, connection, event, recipe, sendCommand, telemetry])
 

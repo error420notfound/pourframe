@@ -32,11 +32,11 @@ function formatDuration(seconds: number) {
 }
 
 function plotOptions(width: number, height: number): uPlot.Options {
-  const totalColor = cssColor('--chart-total', '#512612')
-  const upperColor = cssColor('--chart-upper', '#336b8e')
-  const lowerColor = cssColor('--chart-lower', '#247a36')
-  const axisColor = cssColor('--muted', '#67615e')
-  const gridColor = cssColor('--border', '#dedbd8')
+  const totalColor = cssColor('--chart-total', 'rgba(255, 105, 20, 1)')
+  const upperColor = cssColor('--chart-upper', 'rgba(99, 56, 255, 1)')
+  const lowerColor = cssColor('--chart-lower', 'rgba(0, 188, 78, 1)')
+  const axisColor = cssColor('--muted', 'rgba(79, 94, 84, 1)')
+  const gridColor = cssColor('--border', 'rgba(207, 221, 210, 1)')
   const value = (_plot: uPlot, raw: number | null) => raw == null ? '—' : `${raw.toFixed(2)} g`
 
   return {
@@ -228,7 +228,7 @@ export function WeightCapture({ telemetry, online }: WeightCaptureProps) {
     <section className="weight-capture" aria-labelledby="weight-capture-heading">
       <div className="weight-capture__header">
         <div className="weight-capture__copy">
-          <h2 id="weight-capture-heading">Weight Capture</h2>
+          <h2 className="metric-title metric-title--summary" id="weight-capture-heading">Weight Capture</h2>
           <p>Record the combined, upper, and lower filtered weights against elapsed time.</p>
         </div>
         <div className="capture-controls" aria-label="Weight capture controls">

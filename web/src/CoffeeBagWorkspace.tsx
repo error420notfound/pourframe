@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowPathIcon as RotateCcw, BeakerIcon as Coffee, BookmarkSquareIcon as Save, ListBulletIcon as List, PencilIcon as Pencil, PlusIcon as Plus, Squares2X2Icon as Grid2X2, StarIcon as Star, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowPathIcon as RotateCcw, BeakerIcon as Coffee, BookmarkSquareIcon as Save, ListBulletIcon as List, PencilIcon as Pencil, PlusIcon as Plus, Squares2X2Icon as Grid2X2, StarIcon as Star, TrashIcon as Trash2 } from '@heroicons/react/24/solid'
 import {
   beanForms,
   createCoffeeBag,
@@ -15,6 +15,7 @@ import {
   type CoffeeBagSort,
 } from './coffeeBag'
 import type { CoffeeBag as CoffeeBagRecord } from './brewTypes'
+import { Button, EmptyState, LibraryItemCard, Modal, PageHeader, SectionHeader } from './ui'
 
 const sortPreferenceKey = 'pourframe.coffeeBags.sort.v2'
 const filterPreferenceKey = 'pourframe.coffeeBags.filter.v2'
@@ -22,20 +23,6 @@ const viewPreferenceKey = 'pourframe.coffeeBags.view.v1'
 
 function readPreference<T extends string>(key: string, valid: readonly T[], fallback: T): T {
   try { const value = localStorage.getItem(key); return valid.includes(value as T) ? value as T : fallback } catch { return fallback }
-}
-
-function LibraryModal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
-  }, [onClose])
-  return <div className="modal-backdrop library-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section aria-labelledby="bag-modal-title" aria-modal="true" className="modal library-modal" role="dialog">
-    <header className="modal__header"><h2 id="bag-modal-title">{title}</h2><button aria-label="Close" className="icon-button" onClick={onClose}><X aria-hidden="true" /></button></header>
-      {children}
-    </section>
-  </div>
 }
 
 function RatingField({ label, value, onChange }: { label: string; value?: number; onChange: (value: number | undefined) => void }) {
@@ -64,10 +51,9 @@ function BagForm({ draft, setDraft }: { draft: CoffeeBagRecord; setDraft: (bag: 
 }
 
 function BagCard({ bag, view, onOpen, onStar }: { bag: CoffeeBagRecord; view: 'grid' | 'list'; onOpen: () => void; onStar: () => void }) {
-  return <article className={`bag-card bag-card--${view} ${isDepletedCoffeeBag(bag) ? 'bag-card--depleted' : ''}`}>
-    <button className="bag-card__open" onClick={onOpen} type="button"><strong>{bag.name}</strong><span>{bag.roastery}</span><b>{bag.remainingWeightG.toFixed(1)} / {bag.originalWeightG.toFixed(1)} g</b><small>{isDepletedCoffeeBag(bag) ? 'Depleted' : `Roasted ${new Date(`${bag.roastedOn}T00:00:00`).toLocaleDateString()}`}</small></button>
-    <button aria-label={`${bag.starred ? 'Unstar' : 'Star'} ${bag.name}`} className={bag.starred ? 'library-star active' : 'library-star'} onClick={onStar} type="button"><Star aria-hidden="true" /></button>
-  </article>
+  return <LibraryItemCard className={`bag-card bag-card--${view} ${isDepletedCoffeeBag(bag) ? 'bag-card--depleted' : ''}`} label={bag.name} onOpen={onOpen} onToggleStar={onStar} openClassName="bag-card__open" starred={bag.starred}>
+    <strong className="card-title">{bag.name}</strong><span>{bag.roastery}</span><b>{bag.remainingWeightG.toFixed(1)} / {bag.originalWeightG.toFixed(1)} g</b><small>{isDepletedCoffeeBag(bag) ? 'Depleted' : `Roasted ${new Date(`${bag.roastedOn}T00:00:00`).toLocaleDateString()}`}</small>
+  </LibraryItemCard>
 }
 
 export function CoffeeBagWorkspace({ bags, onSave, onDelete, onUse }: { bags: CoffeeBagRecord[]; onSave: (bag: CoffeeBagRecord) => Promise<void>; onDelete: (id: string) => Promise<void>; onUse: (id: string) => void }) {
@@ -99,17 +85,17 @@ export function CoffeeBagWorkspace({ bags, onSave, onDelete, onUse }: { bags: Co
     if (!refill || !Number.isFinite(Number(refillWeight)) || Number(refillWeight) <= 0 || !refillRoastedOn) { setMessage('Add the new bag weight and roasted-on date.'); return }
     if (await save({ ...refill, originalWeightG: Number(refillWeight), remainingWeightG: Number(refillWeight), roastedOn: refillRoastedOn })) setRefill(null)
   }
-  const renderGroup = (title: string, group: CoffeeBagRecord[]) => group.length ? <section className="library-group"><h3>{title}<small>{group.length}</small></h3><div className={`bag-collection bag-collection--${view}`}>{group.map((bag) => <BagCard bag={bag} key={bag.id} onOpen={() => setSelectedId(bag.id)} onStar={() => void toggleStar(bag)} view={view} />)}</div></section> : null
+  const renderGroup = (title: string, group: CoffeeBagRecord[]) => group.length ? <section className="library-group"><SectionHeader count={group.length} title={title} variant="compact" /><div className={`bag-collection bag-collection--${view}`}>{group.map((bag) => <BagCard bag={bag} key={bag.id} onOpen={() => setSelectedId(bag.id)} onStar={() => void toggleStar(bag)} view={view} />)}</div></section> : null
 
   return <section className="library-workspace coffee-library-workspace">
-    <header className="library-workspace__header"><div><p className="brew-eyebrow">Shared inventory</p><h2>Beans</h2><p>Keep the coffees you have on hand ready for your next brew.</p></div><button className="new-recipe" onClick={() => setEditor(createCoffeeBag())}><Plus aria-hidden="true" />Add bag</button></header>
+    <PageHeader actions={<Button className="new-recipe" onClick={() => setEditor(createCoffeeBag())} variant="secondary"><Plus aria-hidden="true" />Add bag</Button>} description="Keep the coffees you have on hand ready for your next brew." eyebrow="Shared inventory" title="Beans" variant="library" />
     <div className="library-controls"><div className="view-toggle" aria-label="Inventory layout"><button aria-pressed={view === 'grid'} onClick={() => setView('grid')} type="button"><Grid2X2 aria-hidden="true" />Grid</button><button aria-pressed={view === 'list'} onClick={() => setView('list')} type="button"><List aria-hidden="true" />List</button></div><label><span>Show</span><select onChange={(event) => setFilter(event.target.value as CoffeeBagFilter)} value={filter}><option value="active">Active</option><option value="depleted">Depleted</option><option value="all">All bags</option></select></label><label><span>Sort</span><select onChange={(event) => setSort(event.target.value as CoffeeBagSort)} value={sort}><option value="roast-oldest">Oldest roast</option><option value="roast-newest">Newest roast</option><option value="remaining-low">Lowest remaining</option><option value="remaining-high">Most remaining</option><option value="roastery">Roastery A–Z</option><option value="name">Coffee name A–Z</option><option value="updated">Recently updated</option></select></label></div>
     {renderGroup('Starred', starred)}
     {renderGroup(filter === 'all' ? 'All bags' : filter === 'active' ? 'Active bags' : 'Depleted bags', remaining)}
-    {!starred.length && !remaining.length ? <div className="bag-empty"><Coffee aria-hidden="true" /><strong>No coffee bags here yet</strong><span>Add a bag or change the filter.</span></div> : null}
+    {!starred.length && !remaining.length ? <EmptyState description="Add a bag or change the filter." icon={<Coffee aria-hidden="true" />} title="No coffee bags here yet" /> : null}
     <p className="library-message" role="status">{message}</p>
-    {selected ? <LibraryModal onClose={() => setSelectedId(null)} title={selected.name}><div className="library-modal__body"><div className="modal-toolbar"><button className="library-star active" onClick={() => void toggleStar(selected)} type="button"><Star aria-hidden="true" />{selected.starred ? 'Starred' : 'Star'}</button><button onClick={() => setEditor(normalizeCoffeeBag(selected))} type="button"><Pencil aria-hidden="true" />Edit</button><button onClick={() => { setRefill(selected); setRefillWeight(String(selected.originalWeightG)); setRefillRoastedOn(selected.roastedOn) }} type="button"><RotateCcw aria-hidden="true" />Refill</button><button className="danger" onClick={() => void remove(selected)} type="button"><Trash2 aria-hidden="true" />Remove</button></div><div className="bag-weight-summary"><div><span>Remaining</span><strong>{selected.remainingWeightG.toFixed(1)} g</strong></div><div><span>Bag weight</span><strong>{selected.originalWeightG.toFixed(1)} g</strong></div></div><dl className="library-detail"><div><dt>Roastery</dt><dd>{selected.roastery}</dd></div><div><dt>Roasted</dt><dd>{new Date(`${selected.roastedOn}T00:00:00`).toLocaleDateString()}</dd></div><div><dt>Roast</dt><dd>{selected.roastLevel}</dd></div><div><dt>Origin</dt><dd>{selected.origin || 'Not recorded'}</dd></div><div><dt>Tasting notes</dt><dd>{selected.tastingNotes.filter(Boolean).join(' · ') || 'Not recorded'}</dd></div><div><dt>Processing</dt><dd>{selected.processing.join(' · ') || 'Not recorded'}</dd></div></dl><button className="brew-primary button--full" onClick={() => { onUse(selected.id); setSelectedId(null) }} type="button">Use for next brew</button></div></LibraryModal> : null}
-    {editor ? <LibraryModal onClose={() => setEditor(null)} title={bags.some((bag) => bag.id === editor.id) ? 'Edit coffee bag' : 'Add coffee bag'}><div className="library-modal__body"><BagForm draft={editor} setDraft={(value) => setEditor((current) => { if (!current) return current; return typeof value === 'function' ? value(current) : value })} /><button className="brew-primary button--full" onClick={() => void save(editor)} type="button"><Save aria-hidden="true" />Save coffee bag</button></div></LibraryModal> : null}
-    {refill ? <LibraryModal onClose={() => setRefill(null)} title={`Refill ${refill.name}`}><div className="library-modal__body refill-form"><p>This replaces the tracked bag with a new bag of the same coffee profile.</p><label className="recipe-field"><span>New bag weight</span><div><input min="0.1" onChange={(event) => setRefillWeight(event.target.value)} step="0.1" type="number" value={refillWeight} /><small>g</small></div></label><label className="recipe-field"><span>New roasted-on date</span><input onChange={(event) => setRefillRoastedOn(event.target.value)} type="date" value={refillRoastedOn} /></label><button className="brew-primary button--full" onClick={() => void saveRefill()} type="button"><RotateCcw aria-hidden="true" />Replace tracked bag</button></div></LibraryModal> : null}
+    {selected ? <Modal onClose={() => setSelectedId(null)} title={selected.name} variant="library"><div className="library-modal__body"><div className="modal-toolbar"><button className="library-star active" onClick={() => void toggleStar(selected)} type="button"><Star aria-hidden="true" />{selected.starred ? 'Starred' : 'Star'}</button><button onClick={() => setEditor(normalizeCoffeeBag(selected))} type="button"><Pencil aria-hidden="true" />Edit</button><button onClick={() => { setRefill(selected); setRefillWeight(String(selected.originalWeightG)); setRefillRoastedOn(selected.roastedOn) }} type="button"><RotateCcw aria-hidden="true" />Refill</button><button className="danger" onClick={() => void remove(selected)} type="button"><Trash2 aria-hidden="true" />Remove</button></div><div className="bag-weight-summary"><div><span>Remaining</span><strong>{selected.remainingWeightG.toFixed(1)} g</strong></div><div><span>Bag weight</span><strong>{selected.originalWeightG.toFixed(1)} g</strong></div></div><dl className="library-detail"><div><dt>Roastery</dt><dd>{selected.roastery}</dd></div><div><dt>Roasted</dt><dd>{new Date(`${selected.roastedOn}T00:00:00`).toLocaleDateString()}</dd></div><div><dt>Roast</dt><dd>{selected.roastLevel}</dd></div><div><dt>Origin</dt><dd>{selected.origin || 'Not recorded'}</dd></div><div><dt>Tasting notes</dt><dd>{selected.tastingNotes.filter(Boolean).join(' · ') || 'Not recorded'}</dd></div><div><dt>Processing</dt><dd>{selected.processing.join(' · ') || 'Not recorded'}</dd></div></dl><Button fullWidth onClick={() => { onUse(selected.id); setSelectedId(null) }} type="button">Use for next brew</Button></div></Modal> : null}
+    {editor ? <Modal onClose={() => setEditor(null)} title={bags.some((bag) => bag.id === editor.id) ? 'Edit coffee bag' : 'Add coffee bag'} variant="library"><div className="library-modal__body"><BagForm draft={editor} setDraft={(value) => setEditor((current) => { if (!current) return current; return typeof value === 'function' ? value(current) : value })} /><Button fullWidth onClick={() => void save(editor)} type="button"><Save aria-hidden="true" />Save coffee bag</Button></div></Modal> : null}
+    {refill ? <Modal onClose={() => setRefill(null)} title={`Refill ${refill.name}`} variant="library"><div className="library-modal__body refill-form"><p>This replaces the tracked bag with a new bag of the same coffee profile.</p><label className="recipe-field"><span>New bag weight</span><div><input min="0.1" onChange={(event) => setRefillWeight(event.target.value)} step="0.1" type="number" value={refillWeight} /><small>g</small></div></label><label className="recipe-field"><span>New roasted-on date</span><input onChange={(event) => setRefillRoastedOn(event.target.value)} type="date" value={refillRoastedOn} /></label><Button fullWidth onClick={() => void saveRefill()} type="button"><RotateCcw aria-hidden="true" />Replace tracked bag</Button></div></Modal> : null}
   </section>
 }

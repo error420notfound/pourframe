@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { expectedRecipeYield, formatRecipeWeight, formatTime } from './brew'
 import { isDepletedCoffeeBag } from './coffeeBag'
 import type { BrewRecipe, CoffeeBag } from './brewTypes'
+import { Button } from './ui'
 
 interface BrewSelectionSheetProps {
   dark: boolean
@@ -61,7 +62,7 @@ export function BrewSelectionSheet({ dark, recipes, coffeeBags, selectedRecipeId
         <header className="brew-selection-sheet__header">
           <div>
             <span className="brew-selection-sheet__step">Brew setup</span>
-            <h2 id="brew-selection-title">Choose your brew</h2>
+            <h2 className="modal-title modal-title--selection" id="brew-selection-title">Choose your brew</h2>
             <p>Pick your coffee and recipe for this brew.</p>
           </div>
           <button aria-label="Close brew selection" className="icon-button" onClick={onClose} ref={closeButtonRef} type="button"><X aria-hidden="true" /></button>
@@ -69,7 +70,7 @@ export function BrewSelectionSheet({ dark, recipes, coffeeBags, selectedRecipeId
 
         <div className="brew-selection-sheet__body">
           <section aria-labelledby="brew-selection-coffee-heading" className="brew-selection-section">
-            <div className="brew-selection-section__heading"><div><span>01</span><h3 id="brew-selection-coffee-heading">Coffee beans</h3></div><small>Swipe to browse</small></div>
+            <div className="brew-selection-section__heading"><div><span>01</span><h3 className="section-title section-title--selection" id="brew-selection-coffee-heading">Coffee beans</h3></div><small>Swipe to browse</small></div>
             <div aria-label="Coffee beans" className="brew-selection-rail">
               <SelectionCard label="Brew without a coffee bag" selected={draftCoffeeBagId === null} onClick={() => setDraftCoffeeBagId(null)}><div className="brew-selection-card__icon"><Coffee aria-hidden="true" /></div><strong>No coffee bag</strong><span>Skip inventory tracking</span><small>Choose this if the beans are not in the shared library.</small></SelectionCard>
               {orderedCoffeeBags.map((bag) => {
@@ -85,7 +86,7 @@ export function BrewSelectionSheet({ dark, recipes, coffeeBags, selectedRecipeId
             </div>
           </section>
           <section aria-labelledby="brew-selection-recipe-heading" className="brew-selection-section">
-            <div className="brew-selection-section__heading"><div><span>02</span><h3 id="brew-selection-recipe-heading">Brew recipes</h3></div><small>Swipe to browse</small></div>
+            <div className="brew-selection-section__heading"><div><span>02</span><h3 className="section-title section-title--selection" id="brew-selection-recipe-heading">Brew recipes</h3></div><small>Swipe to browse</small></div>
             <div aria-label="Brew recipes" className="brew-selection-rail">
               {recipes.map((recipe) => <SelectionCard key={recipe.id} label={`Select ${recipe.name}`} selected={draftRecipeId === recipe.id} onClick={() => setDraftRecipeId(recipe.id)}>
                 <div className="brew-selection-card__topline"><span>{recipe.serveStyle === 'iced' ? 'Iced brew' : 'Hot brew'}</span><span>{recipe.dripper}</span></div>
@@ -101,7 +102,7 @@ export function BrewSelectionSheet({ dark, recipes, coffeeBags, selectedRecipeId
           {selectedRecipe ? <p className="brew-selection-sheet__summary"><strong>{selectedRecipe.name}</strong><span>{formatRecipeWeight(selectedRecipe.coffee)} g coffee · {formatTime(selectedRecipe.brewTime)}</span></p> : null}
           <div className="brew-selection-sheet__footer-row">
             <span className="brew-selection-sheet__footer-note">Your choices are applied when you prepare the brew.</span>
-            <button className="brew-primary" disabled={!selectedRecipe} onClick={() => selectedRecipe && onConfirm(selectedRecipe.id, draftCoffeeBagId)} type="button">Prepare brew<Coffee aria-hidden="true" /></button>
+            <Button disabled={!selectedRecipe} onClick={() => selectedRecipe && onConfirm(selectedRecipe.id, draftCoffeeBagId)} type="button">Prepare brew<Coffee aria-hidden="true" /></Button>
           </div>
         </footer>
       </section>
