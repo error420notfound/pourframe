@@ -324,7 +324,7 @@ describe('2 Hz published trace format', () => {
     expect(events).toEqual(['append', 'clear'])
   })
 
-  it('maps saved trace samples into uPlot columns', () => {
+  it('maps saved trace samples into chart columns', () => {
     const sample = traceSample(telemetry(), undefined, 250, 0)
     expect(traceColumns([sample])).toEqual([[0.25], [20], [10], [10]])
   })

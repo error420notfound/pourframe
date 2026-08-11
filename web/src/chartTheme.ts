@@ -1,5 +1,7 @@
 export function cssColor(name: string, fallback: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+  if (typeof document === 'undefined' || typeof getComputedStyle === 'undefined') return fallback
+  const scope = document.querySelector('.appliance') ?? document.documentElement
+  return getComputedStyle(scope).getPropertyValue(name).trim() || fallback
 }
 
 export function displayP3Color(p3: readonly [number, number, number], fallback: readonly [number, number, number], alpha = 1) {

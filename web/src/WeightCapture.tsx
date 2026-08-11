@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import uPlot from 'uplot'
-import 'uplot/dist/uPlot.min.css'
+import type { LineSeriesOption } from 'echarts/charts'
 import { captureFilename, captureToCsv, MAX_CAPTURE_SAMPLES, telemetryToCaptureSample, type CaptureSample } from './capture'
 import type { DeviceTelemetry } from './types'
 import { cssColor, withAlpha } from './chartTheme'
+import { useEChart, type PourFrameChartOption } from './echarts'
 
 interface WeightCaptureProps {
   telemetry: DeviceTelemetry | null
@@ -11,12 +11,18 @@ interface WeightCaptureProps {
 }
 
 type CapturePhase = 'idle' | 'recording' | 'stopped'
-type CaptureColumns = [number[], Array<number | null>, Array<number | null>, Array<number | null>]
-const smoothPath = uPlot.paths.spline?.({ alignGaps: 0 })
+export type CaptureColumns = [number[], Array<number | null>, Array<number | null>, Array<number | null>]
 
 interface CaptureProgress {
   elapsedSeconds: number
   sampleCount: number
+}
+
+interface TooltipDatum {
+  axisValue?: number | string
+  marker?: string
+  seriesName?: string
+  value?: unknown
 }
 
 const emptyProgress: CaptureProgress = { elapsedSeconds: 0, sampleCount: 0 }
@@ -31,59 +37,134 @@ function formatDuration(seconds: number) {
   return `${minutes.toString().padStart(2, '0')}:${remaining.toFixed(1).padStart(4, '0')}`
 }
 
-function plotOptions(width: number, height: number): uPlot.Options {
-  const totalColor = cssColor('--chart-total', 'rgba(255, 105, 20, 1)')
-  const upperColor = cssColor('--chart-upper', 'rgba(99, 56, 255, 1)')
-  const lowerColor = cssColor('--chart-lower', 'rgba(0, 188, 78, 1)')
-  const axisColor = cssColor('--muted', 'rgba(79, 94, 84, 1)')
-  const gridColor = cssColor('--border', 'rgba(207, 221, 210, 1)')
-  const value = (_plot: uPlot, raw: number | null) => raw == null ? '—' : `${raw.toFixed(2)} g`
+function seriesData(times: number[], values: Array<number | null>): Array<[number, number | null]> {
+  return times.map((time, index) => [time, values[index]])
+}
 
+function numericPointValue(value: unknown) {
+  if (Array.isArray(value)) {
+    const candidate = value[1]
+    return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null
+  }
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function tooltipFormatter(params: unknown) {
+  const rows = (Array.isArray(params) ? params : [params]).filter(Boolean) as TooltipDatum[]
+  const seconds = Number(rows[0]?.axisValue)
+  const heading = Number.isFinite(seconds) ? `${seconds.toFixed(3)} s` : 'Weight capture'
+  const values = rows.map((row) => {
+    const value = numericPointValue(row.value)
+    return `<div class="pourframe-chart-tooltip__row">${row.marker ?? ''}<span>${row.seriesName ?? 'Weight'}</span><strong>${value == null ? '—' : `${value.toFixed(2)} g`}</strong></div>`
+  }).join('')
+  return `<div class="pourframe-chart-tooltip__time">${heading}</div>${values}`
+}
+
+function captureSeries(columns: CaptureColumns): LineSeriesOption[] {
+  const colors = [
+    cssColor('--chart-total', 'rgba(255, 105, 20, 1)'),
+    cssColor('--chart-upper', 'rgba(99, 56, 255, 1)'),
+    cssColor('--chart-lower', 'rgba(0, 188, 78, 1)'),
+  ]
+  const names = ['Total', 'Upper', 'Lower']
+  return names.map((name, index) => ({
+    id: `capture-${name.toLowerCase()}`,
+    name,
+    type: 'line',
+    data: seriesData(columns[0], columns[index + 1]),
+    animation: false,
+    smooth: 0.2,
+    connectNulls: false,
+    showSymbol: false,
+    sampling: 'lttb',
+    lineStyle: { color: withAlpha(colors[index], index === 0 ? 0.92 : 0.88), width: index === 0 ? 2.3 : 1.8, cap: 'round', join: 'round' },
+    itemStyle: { color: colors[index] },
+    areaStyle: { color: withAlpha(colors[index], index === 0 ? 0.12 : 0.08), origin: 'start' },
+    emphasis: { focus: 'series' },
+  }))
+}
+
+export function buildWeightCaptureOption(columns: CaptureColumns): PourFrameChartOption {
+  const axis = cssColor('--muted', 'rgba(79, 94, 84, 1)')
+  const grid = cssColor('--border', 'rgba(207, 221, 210, 1)')
+  const surface = cssColor('--app-surface', 'rgba(255, 255, 255, 1)')
+  const text = cssColor('--app-text', 'rgba(23, 21, 20, 1)')
   return {
-    width,
-    height,
-    scales: { x: { time: false } },
-    cursor: { drag: { setScale: false, x: false, y: false }, focus: { prox: 30 } },
-    legend: { show: true, live: true },
-    series: [
+    animation: false,
+    backgroundColor: 'transparent',
+    grid: { left: 62, right: 18, top: 46, bottom: 68, containLabel: false },
+    legend: {
+      show: true,
+      top: 2,
+      left: 52,
+      right: 74,
+      selectedMode: true,
+      itemWidth: 18,
+      itemHeight: 3,
+      textStyle: { color: text, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 11 },
+    },
+    tooltip: {
+      show: true,
+      trigger: 'axis',
+      triggerOn: 'mousemove|click|mousewheel',
+      confine: true,
+      className: 'pourframe-chart-tooltip',
+      backgroundColor: withAlpha(surface, 0.96),
+      borderColor: grid,
+      borderWidth: 1,
+      padding: [9, 11],
+      textStyle: { color: text, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 11 },
+      axisPointer: { type: 'cross', label: { show: false }, lineStyle: { color: axis, type: 'dashed', width: 1 } },
+      formatter: tooltipFormatter,
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false, preventDefaultMouseMove: true, start: 0, end: 100 },
       {
-        label: 'Time',
-        value: (_plot, raw) => raw == null ? '—' : `${raw.toFixed(3)} s`,
+        type: 'slider',
+        xAxisIndex: 0,
+        filterMode: 'none',
+        start: 0,
+        end: 100,
+        height: 16,
+        bottom: 8,
+        borderColor: 'transparent',
+        backgroundColor: withAlpha(grid, 0.22),
+        fillerColor: withAlpha(axis, 0.18),
+        handleStyle: { color: surface, borderColor: axis },
+        moveHandleStyle: { color: axis },
+        dataBackground: { lineStyle: { color: axis, opacity: 0.5 }, areaStyle: { color: axis, opacity: 0.08 } },
+        selectedDataBackground: { lineStyle: { color: axis, opacity: 0.72 }, areaStyle: { color: axis, opacity: 0.14 } },
+        textStyle: { color: axis, fontSize: 9 },
       },
-      { label: 'Total', paths: smoothPath, stroke: withAlpha(totalColor, 0.92), fill: withAlpha(totalColor, 0.12), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 2.3, spanGaps: false, points: { show: false }, value },
-      { label: 'Upper', paths: smoothPath, stroke: withAlpha(upperColor, 0.88), fill: withAlpha(upperColor, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 1.8, spanGaps: false, points: { show: false }, value },
-      { label: 'Lower', paths: smoothPath, stroke: withAlpha(lowerColor, 0.88), fill: withAlpha(lowerColor, 0.1), fillTo: (plot) => plot.scales.y?.min ?? 0, width: 1.8, spanGaps: false, points: { show: false }, value },
     ],
-    axes: [
-      {
-        label: 'Elapsed time (s)',
-        stroke: axisColor,
-        grid: { stroke: gridColor, width: 1 },
-        ticks: { stroke: gridColor, width: 1 },
-        font: '12px Inter, ui-sans-serif, system-ui, sans-serif',
-        labelFont: '600 12px Inter, ui-sans-serif, system-ui, sans-serif',
-        values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(tick < 10 ? 1 : 0)),
-      },
-      {
-        label: 'Weight (g)',
-        stroke: axisColor,
-        grid: { stroke: gridColor, width: 1 },
-        ticks: { stroke: gridColor, width: 1 },
-        font: '12px Inter, ui-sans-serif, system-ui, sans-serif',
-        labelFont: '600 12px Inter, ui-sans-serif, system-ui, sans-serif',
-        values: (_plot, ticks) => ticks.map((tick) => tick.toFixed(1)),
-        size: 62,
-      },
-    ],
+    xAxis: {
+      type: 'value',
+      name: 'Elapsed time (s)',
+      nameLocation: 'middle',
+      nameGap: 28,
+      nameTextStyle: { color: axis, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 11, fontWeight: 600 },
+      axisLine: { lineStyle: { color: grid } },
+      axisTick: { lineStyle: { color: grid } },
+      axisLabel: { color: axis, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 10, formatter: (value: number) => value.toFixed(value < 10 ? 1 : 0) },
+      splitLine: { lineStyle: { color: grid } },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      name: 'Weight (g)',
+      nameLocation: 'middle',
+      nameGap: 47,
+      nameTextStyle: { color: axis, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 11, fontWeight: 600 },
+      axisLine: { show: true, lineStyle: { color: grid } },
+      axisTick: { show: true, lineStyle: { color: grid } },
+      axisLabel: { color: axis, fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif', fontSize: 10, formatter: (value: number) => value.toFixed(1) },
+      splitLine: { lineStyle: { color: grid } },
+    },
+    series: captureSeries(columns),
   }
 }
 
 export function WeightCapture({ telemetry, online }: WeightCaptureProps) {
-  const plotHostRef = useRef<HTMLDivElement | null>(null)
-  const plotRef = useRef<uPlot | null>(null)
-  const resizeObserverRef = useRef<ResizeObserver | null>(null)
-  const resizeAnimationFrameRef = useRef<number | null>(null)
-  const animationFrameRef = useRef<number | null>(null)
   const recordingRef = useRef(false)
   const samplesRef = useRef<CaptureSample[]>([])
   const columnsRef = useRef<CaptureColumns>(emptyColumns())
@@ -94,22 +175,20 @@ export function WeightCapture({ telemetry, online }: WeightCaptureProps) {
   const [phase, setPhase] = useState<CapturePhase>('idle')
   const [progress, setProgress] = useState<CaptureProgress>(emptyProgress)
   const [message, setMessage] = useState('Press Start to capture live weight data.')
+  const createOption = useCallback(() => buildWeightCaptureOption(columnsRef.current), [])
+  const { chartRef, hostRef, scheduleOption } = useEChart(createOption, 'weight-capture')
 
-  const schedulePlotUpdate = useCallback(() => {
-    if (animationFrameRef.current !== null) return
-    animationFrameRef.current = window.requestAnimationFrame(() => {
-      animationFrameRef.current = null
-      plotRef.current?.setData(columnsRef.current)
-    })
-  }, [])
+  const scheduleChartUpdate = useCallback(() => {
+    scheduleOption(() => ({ series: captureSeries(columnsRef.current) }))
+  }, [scheduleOption])
 
   const finishCapture = useCallback((detail: string) => {
     if (!recordingRef.current) return
     recordingRef.current = false
     setPhase('stopped')
     setMessage(detail)
-    schedulePlotUpdate()
-  }, [schedulePlotUpdate])
+    scheduleChartUpdate()
+  }, [scheduleChartUpdate])
 
   const appendTelemetry = useCallback((nextTelemetry: DeviceTelemetry) => {
     if (!recordingRef.current) return
@@ -142,41 +221,8 @@ export function WeightCapture({ telemetry, online }: WeightCaptureProps) {
     columnsRef.current[2].push(sample.upperFiltered)
     columnsRef.current[3].push(sample.lowerFiltered)
     setProgress({ elapsedSeconds: sample.elapsedSeconds, sampleCount: samplesRef.current.length })
-    schedulePlotUpdate()
-  }, [finishCapture, schedulePlotUpdate])
-
-  useEffect(() => {
-    const host = plotHostRef.current
-    if (!host) return
-
-    const initialWidth = Math.max(280, Math.floor(host.getBoundingClientRect().width))
-    const initialHeight = window.matchMedia('(max-width: 640px)').matches ? 220 : 300
-    plotRef.current = new uPlot(plotOptions(initialWidth, initialHeight), columnsRef.current, host)
-
-    resizeObserverRef.current = new ResizeObserver(() => {
-      if (resizeAnimationFrameRef.current !== null) return
-      resizeAnimationFrameRef.current = window.requestAnimationFrame(() => {
-        resizeAnimationFrameRef.current = null
-        const width = Math.floor(host.getBoundingClientRect().width)
-        if (width <= 0) return
-        const height = window.matchMedia('(max-width: 640px)').matches ? 220 : 300
-        const plot = plotRef.current
-        if (plot && (plot.width !== width || plot.height !== height)) plot.setSize({ width, height })
-      })
-    })
-    resizeObserverRef.current.observe(host)
-
-    return () => {
-      resizeObserverRef.current?.disconnect()
-      resizeObserverRef.current = null
-      if (resizeAnimationFrameRef.current !== null) window.cancelAnimationFrame(resizeAnimationFrameRef.current)
-      resizeAnimationFrameRef.current = null
-      if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current)
-      animationFrameRef.current = null
-      plotRef.current?.destroy()
-      plotRef.current = null
-    }
-  }, [])
+    scheduleChartUpdate()
+  }, [finishCapture, scheduleChartUpdate])
 
   useEffect(() => {
     if (telemetry) appendTelemetry(telemetry)
@@ -194,12 +240,17 @@ export function WeightCapture({ telemetry, online }: WeightCaptureProps) {
     setPhase('recording')
     setProgress(emptyProgress)
     setMessage('Recording the live telemetry stream.')
-    schedulePlotUpdate()
+    scheduleChartUpdate()
     appendTelemetry(telemetry)
   }
 
   const stopCapture = () => {
     finishCapture('Capture stopped. The data is ready to export.')
+  }
+
+  const resetZoom = () => {
+    chartRef.current?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
+    setMessage('Chart zoom reset to the full capture.')
   }
 
   const exportCapture = () => {
@@ -232,42 +283,21 @@ export function WeightCapture({ telemetry, online }: WeightCaptureProps) {
           <p>Record the combined, upper, and lower filtered weights against elapsed time.</p>
         </div>
         <div className="capture-controls" aria-label="Weight capture controls">
-          <button className="capture-button capture-button--primary" disabled={!canStart} onClick={startCapture} type="button">
-            Start
-          </button>
-          <button className="capture-button" disabled={phase !== 'recording'} onClick={stopCapture} type="button">
-            Stop
-          </button>
-          <button className="capture-button" disabled={!canExport} onClick={exportCapture} type="button">
-            Export CSV
-          </button>
+          <button className="capture-button capture-button--primary" disabled={!canStart} onClick={startCapture} type="button">Start</button>
+          <button className="capture-button" disabled={phase !== 'recording'} onClick={stopCapture} type="button">Stop</button>
+          <button className="capture-button" disabled={!canExport} onClick={exportCapture} type="button">Export CSV</button>
         </div>
       </div>
 
       <dl className="capture-stats">
-        <div>
-          <dt>Status</dt>
-          <dd className={`capture-status capture-status--${phase}${phase === 'recording' && !online ? ' capture-status--waiting' : ''}`}>
-            <i aria-hidden="true" />{status}
-          </dd>
-        </div>
-        <div>
-          <dt>Duration</dt>
-          <dd>{formatDuration(progress.elapsedSeconds)}</dd>
-        </div>
-        <div>
-          <dt>Samples</dt>
-          <dd>{progress.sampleCount.toLocaleString('en-US')}</dd>
-        </div>
+        <div><dt>Status</dt><dd className={`capture-status capture-status--${phase}${phase === 'recording' && !online ? ' capture-status--waiting' : ''}`}><i aria-hidden="true" />{status}</dd></div>
+        <div><dt>Duration</dt><dd>{formatDuration(progress.elapsedSeconds)}</dd></div>
+        <div><dt>Samples</dt><dd>{progress.sampleCount.toLocaleString('en-US')}</dd></div>
       </dl>
 
       <div className="capture-chart-frame">
-        <div
-          aria-label="Elapsed time chart of total, upper, and lower weight in grams"
-          className="capture-chart"
-          ref={plotHostRef}
-          role="img"
-        />
+        <button className="capture-chart__reset" disabled={progress.sampleCount === 0} onClick={resetZoom} type="button">Reset zoom</button>
+        <div aria-label="Elapsed time chart of total, upper, and lower weight in grams" className="capture-chart" ref={hostRef} role="img" />
         {progress.sampleCount === 0 ? <p className="capture-chart__empty">Start a capture to plot live weight data.</p> : null}
       </div>
       <p className="capture-message" role="status">{message}</p>

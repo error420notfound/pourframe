@@ -380,13 +380,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   overflow: hidden;
 }
 
-.capture-chart { width: 100%; min-height: 332px; }
-.capture-chart .uplot { max-width: 100%; font-family: inherit; }
-.capture-chart .u-under { opacity: 0.92; }
-.capture-chart .u-legend { margin-bottom: 10px; color: var(--text); font-size: 0.78rem; }
-.capture-chart .u-legend .u-series { padding: 3px 9px; }
-.capture-chart .u-legend .u-label { font-weight: 650; }
-.capture-chart .u-legend .u-value { color: var(--muted); font-variant-numeric: tabular-nums; }
+.capture-chart { width: 100%; height: 332px; min-height: 0; touch-action: pan-y; }
+.capture-chart__reset { position: absolute; z-index: 2; top: 18px; right: 18px; min-height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 999px; background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--muted); font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer; backdrop-filter: blur(8px); }
+.capture-chart__reset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.capture-chart__reset:disabled { opacity: .42; cursor: default; }
 
 .capture-chart__empty {
   position: absolute;
@@ -897,9 +894,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .capture-status { gap: 6px; }
   .capture-status i { width: 8px; height: 8px; }
   .capture-chart-frame { margin-top: 20px; padding: 12px 8px 6px; }
-  .capture-chart { min-height: 252px; }
-  .capture-chart .u-legend { font-size: 0.7rem; }
-  .capture-chart .u-legend .u-series { padding-inline: 5px; }
+  .capture-chart { height: 252px; min-height: 0; }
+  .capture-chart__reset { top: 12px; right: 10px; }
   .capture-chart__empty { inset: 62px 12px 30px; }
   .advanced-targets__grid { grid-template-columns: 1fr; gap: 0; }
   .scale-grid { padding: 0 20px; }
@@ -1104,12 +1100,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   inset: 0;
   z-index: 1;
   content: '';
-  background: linear-gradient(90deg, rgba(6, 15, 9, .68) 0%, rgba(6, 15, 9, .34) 48%, rgba(6, 15, 9, .62) 100%), linear-gradient(180deg, rgba(6, 15, 9, .2), rgba(6, 15, 9, .58));
+  background: linear-gradient(90deg, rgba(6, 15, 9, .58) 0%, rgba(6, 15, 9, .26) 48%, rgba(6, 15, 9, .52) 100%), linear-gradient(180deg, rgba(6, 15, 9, .16), rgba(6, 15, 9, .48));
   pointer-events: none;
 }
 .active-brew-summary__graph { position: absolute; z-index: 0; inset: 0; pointer-events: none; }
 .active-brew-summary__graph .brew-graph, .active-brew-summary__graph .brew-graph__drawing, .active-brew-summary__graph .brew-graph__plot { width: 100%; height: 100%; min-height: 0; max-width: none; border-radius: 0; background: transparent; overflow: hidden; }
-.active-brew-summary__graph .uplot { max-width: none; }
 .active-brew-summary__graph .brew-graph__empty { z-index: 1; inset: 0; padding: 0 24px; color: rgba(246, 247, 244, .72); font-size: .82rem; letter-spacing: .08em; text-transform: uppercase; }
 .active-brew-summary__content {
   position: relative;
@@ -1358,7 +1353,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .active-brew-summary__confirm-end { border: 1px solid #eaa099; background: #eaa099; color: #2b0c09; }
 
 .active-brew-summary[data-theme='light']::after {
-  background: linear-gradient(90deg, rgba(247, 247, 245, .48) 0%, rgba(247, 247, 245, .18) 48%, rgba(247, 247, 245, .38) 100%), linear-gradient(180deg, rgba(247, 247, 245, .12), rgba(247, 247, 245, .38));
+  background: linear-gradient(90deg, rgba(247, 247, 245, .42) 0%, rgba(247, 247, 245, .12) 48%, rgba(247, 247, 245, .32) 100%), linear-gradient(180deg, rgba(247, 247, 245, .08), rgba(247, 247, 245, .3));
 }
 .active-brew-summary[data-theme='light'] .active-brew-summary__graph {
   background: transparent;
@@ -1381,11 +1376,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .active-brew-summary[data-theme='light'] .active-brew-summary__confirm-backdrop { background: rgba(236, 239, 235, .76); }
 .active-brew-summary[data-theme='light'] .active-brew-summary__confirm { border-color: rgba(17, 17, 17, .13); background: #ffffff; box-shadow: 0 24px 90px rgba(34, 48, 38, .22); }
 .active-brew-summary[data-theme='light'] .active-brew-summary__confirm-cancel { border-color: rgba(17, 17, 17, .14); }
-.active-brew-summary[data-theme='light'] .brew-graph__trace--backdrop .brew-graph__trace-total { stroke: #267844; }
-.active-brew-summary[data-theme='light'] .brew-graph__trace--backdrop .brew-graph__trace-upper { stroke: #28718b; }
-.active-brew-summary[data-theme='light'] .brew-graph__trace--backdrop .brew-graph__trace-lower { stroke: #477f3c; }
-.active-brew-summary[data-theme='light'] .brew-graph__trace--backdrop .brew-graph__trace-area { fill: rgba(38, 120, 68, .4); }
-
 .brew-readings { position: sticky; top: 104px; padding: 28px; display: grid; gap: 24px; }
 .brew-readings { grid-column: 2; grid-row: 2; }
 .brew-readings--warning { border-color: #d8aa48; }
@@ -1432,12 +1422,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brew-graph__milestones { min-height: 28px; margin-bottom: 8px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 .brew-graph__milestone { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--app-line); border-radius: 999px; color: var(--app-muted); background: var(--app-surface-2); font-size: .68rem; font-weight: 650; }
 .brew-graph__milestone--pour { border-color: color-mix(in srgb, var(--app-accent) 45%, var(--app-line)); color: var(--app-accent); }
-.brew-graph__drawing { position: relative; min-width: 0; }.brew-graph__plot { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; border-radius: 14px; background: linear-gradient(180deg, var(--app-surface) 0%, var(--app-surface-2) 100%); }
-.brew-graph__plot .uplot { max-width: 100%; }
-.brew-graph__trace { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }.brew-graph__trace path { fill: none; stroke-linecap: round; stroke-linejoin: round; }.brew-graph__trace .brew-graph__trace-area { fill: rgba(123, 215, 150, .16); stroke: none; }.brew-graph__trace-total { stroke: var(--chart-total, #512612); stroke-width: 5; }.brew-graph__trace-upper { stroke: var(--chart-upper, #336b8e); stroke-width: 3.5; opacity: .82; }.brew-graph__trace-lower { stroke: var(--chart-lower, #247a36); stroke-width: 3.5; opacity: .82; }.brew-graph__trace--backdrop .brew-graph__trace-total { stroke: #7bd796; stroke-width: 6; }.brew-graph__trace--backdrop .brew-graph__trace-upper { stroke: #8ac7df; stroke-width: 4; opacity: .76; }.brew-graph__trace--backdrop .brew-graph__trace-lower { stroke: #b2dfa8; stroke-width: 4; opacity: .76; }
-.brew-graph__plot .u-under { opacity: 0.92; }
-.brew-graph__plot .u-legend { margin-bottom: 8px; color: var(--app-text); font-size: .72rem; }
-.brew-graph__plot .u-series { padding: 3px 8px; }
+.brew-graph__drawing { position: relative; min-width: 0; }
+.brew-graph__plot { min-width: 0; width: 100%; height: 300px; max-width: 100%; overflow: hidden; border-radius: 14px; background: linear-gradient(180deg, var(--app-surface) 0%, var(--app-surface-2) 100%); touch-action: pan-y; }
+.brew-graph--compact .brew-graph__plot { height: 230px; }
+.brew-graph--backdrop .brew-graph__plot { height: 100%; }
+.pourframe-chart-tooltip { min-width: 132px; border-radius: 10px !important; box-shadow: 0 12px 32px rgba(0, 0, 0, .14); backdrop-filter: blur(10px); }
+.pourframe-chart-tooltip__time { margin-bottom: 6px; color: var(--app-muted, var(--muted)); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pourframe-chart-tooltip__row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px; line-height: 1.65; }
+.pourframe-chart-tooltip__row strong { margin-left: 10px; font-variant-numeric: tabular-nums; }
 .brew-graph__empty { position: absolute; inset: 108px 20px 26px; margin: 0; display: grid; place-items: center; color: var(--app-muted); text-align: center; font-size: .8rem; pointer-events: none; }
 
 .prep-flow { padding: 26px; display: grid; gap: 16px; }
@@ -1673,7 +1665,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     --focus-accent: color(display-p3 0 0.565 0.275);
   }
   .active-brew-summary::after {
-    background: linear-gradient(90deg, color(display-p3 0.004 0.04 0.018 / 0.7) 0%, color(display-p3 0.004 0.04 0.018 / 0.36) 48%, color(display-p3 0.004 0.04 0.018 / 0.64) 100%), linear-gradient(180deg, color(display-p3 0.004 0.04 0.018 / 0.22), color(display-p3 0.004 0.04 0.018 / 0.6));
+    background: linear-gradient(90deg, color(display-p3 0.004 0.04 0.018 / 0.6) 0%, color(display-p3 0.004 0.04 0.018 / 0.28) 48%, color(display-p3 0.004 0.04 0.018 / 0.54) 100%), linear-gradient(180deg, color(display-p3 0.004 0.04 0.018 / 0.18), color(display-p3 0.004 0.04 0.018 / 0.5));
   }
   .active-brew-summary__graph .brew-graph__empty { color: color(display-p3 0.94 1 0.955 / 0.72); }
   .focus-prep {
@@ -1693,7 +1685,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .active-brew-summary__confirm-cancel { border-color: color(display-p3 0.94 1 0.955 / 0.17); }
 
   .active-brew-summary[data-theme='light']::after {
-    background: linear-gradient(90deg, color(display-p3 0.977 0.991 0.979 / 0.5) 0%, color(display-p3 0.977 0.991 0.979 / 0.2) 48%, color(display-p3 0.977 0.991 0.979 / 0.4) 100%), linear-gradient(180deg, color(display-p3 0.977 0.991 0.979 / 0.14), color(display-p3 0.977 0.991 0.979 / 0.4));
+    background: linear-gradient(90deg, color(display-p3 0.977 0.991 0.979 / 0.44) 0%, color(display-p3 0.977 0.991 0.979 / 0.14) 48%, color(display-p3 0.977 0.991 0.979 / 0.34) 100%), linear-gradient(180deg, color(display-p3 0.977 0.991 0.979 / 0.1), color(display-p3 0.977 0.991 0.979 / 0.32));
   }
   .active-brew-summary[data-theme='light'] .active-brew-summary__graph .brew-graph__empty { color: color(display-p3 0.052 0.078 0.061 / 0.62); }
   .active-brew-summary[data-theme='light'] .focus-prep {
@@ -1713,9 +1705,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .active-brew-summary[data-theme='light'] .active-brew-summary__stage-card { background: color(display-p3 1 1 1 / 0.92); box-shadow: 0 5px 18px color(display-p3 0.06 0.16 0.09 / 0.16); }
   .active-brew-summary[data-theme='light'] .active-brew-summary__confirm-backdrop { background: color(display-p3 0.9 0.94 0.91 / 0.76); }
   .active-brew-summary[data-theme='light'] .active-brew-summary__confirm { box-shadow: 0 24px 90px color(display-p3 0.06 0.16 0.09 / 0.22); }
-  .active-brew-summary[data-theme='light'] .brew-graph__trace--backdrop .brew-graph__trace-area { fill: color(display-p3 0 0.72 0.27 / 0.4); }
-  .brew-graph__trace .brew-graph__trace-area { fill: color(display-p3 0.3 0.97 0.49 / 0.16); }
-
   .recipe-library li > button.active, .view-toggle button[aria-pressed='true'] { box-shadow: 0 1px 5px color(display-p3 0 0.03 0.01 / 0.07); }
   .brew-selection-backdrop {
     --app-bg: color(display-p3 0.977 0.991 0.979);
