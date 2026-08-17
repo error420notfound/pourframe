@@ -60,18 +60,29 @@ describe('shared UI primitives', () => {
     expect(markup).toContain('href="#history"')
     expect(markup).toContain('aria-current="page"')
     expect(markup).toContain('Prepare brew')
+    expect(markup).toContain('data-tour="prepare-brew"')
     expect(markup).toContain('disabled=""')
   })
 
   it('keeps settings preferences and destructive history management explicit', () => {
-    const markup = renderToStaticMarkup(<SettingsControls canInstall={false} historyCount={0} onClearHistory={async () => undefined} onInstall={() => undefined} onOpenWifi={() => undefined} onThemePreferenceChange={() => undefined} onToggleSound={() => undefined} sound themePreference="system" wifiEnabled />)
+    const markup = renderToStaticMarkup(<SettingsControls canInstall={false} historyCount={0} onboardingEnabled onClearHistory={async () => undefined} onInstall={() => undefined} onOpenOnboarding={() => undefined} onOpenWifi={() => undefined} onThemePreferenceChange={() => undefined} onToggleSound={() => undefined} sound themePreference="system" wifiEnabled />)
 
     expect(markup).toContain('Brew sounds')
     expect(markup).toContain('aria-pressed="true"')
     expect(markup).toContain('Theme preference')
     expect(markup).toContain('Wi-Fi settings')
+    expect(markup).toContain('data-tour="connectivity"')
+    expect(markup).toContain('Learn PourFrame')
+    expect(markup).toContain('View onboarding')
     expect(markup).toContain('Clear history')
     expect(markup).toContain('disabled=""')
     expect(markup).not.toContain('Install PourFrame')
+  })
+
+  it('disables onboarding replay while a brew owns the interface', () => {
+    const markup = renderToStaticMarkup(<SettingsControls canInstall={false} historyCount={0} onboardingEnabled={false} onClearHistory={async () => undefined} onInstall={() => undefined} onOpenOnboarding={() => undefined} onOpenWifi={() => undefined} onThemePreferenceChange={() => undefined} onToggleSound={() => undefined} sound themePreference="system" wifiEnabled />)
+
+    expect(markup).toContain('The introduction is available after the current brew.')
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>[^<]*<svg[\s\S]*View onboarding<\/button>/)
   })
 })

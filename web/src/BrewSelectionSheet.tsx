@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { BeakerIcon as Coffee, CheckCircleIcon as CheckCircle2, XMarkIcon as X } from '@heroicons/react/24/solid'
 import { createPortal } from 'react-dom'
 import { expectedRecipeYield, formatRecipeWeight, formatTime } from './brew'
@@ -21,54 +21,25 @@ function SelectionCard({ selected, children, disabled = false, label, onClick }:
 }
 
 export function BrewSelectionSheet({ dark, recipes, coffeeBags, selectedRecipeId, selectedCoffeeBagId, onClose, onConfirm }: BrewSelectionSheetProps) {
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [draftRecipeId, setDraftRecipeId] = useState(selectedRecipeId)
   const initialCoffeeBag = selectedCoffeeBagId ? coffeeBags.find((bag) => bag.id === selectedCoffeeBagId) : null
   const [draftCoffeeBagId, setDraftCoffeeBagId] = useState<string | null>(initialCoffeeBag && !isDepletedCoffeeBag(initialCoffeeBag) ? initialCoffeeBag.id : null)
   const orderedCoffeeBags = [...coffeeBags].sort((left, right) => Number(isDepletedCoffeeBag(left)) - Number(isDepletedCoffeeBag(right)))
   const selectedRecipe = recipes.find((recipe) => recipe.id === draftRecipeId) ?? recipes[0] ?? null
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    const appliance = document.querySelector<HTMLElement>('.appliance')
-    const applianceWasInert = appliance?.hasAttribute('inert') ?? false
-    const previousAriaHidden = appliance?.getAttribute('aria-hidden')
-    document.body.style.overflow = 'hidden'
-    appliance?.setAttribute('inert', '')
-    appliance?.setAttribute('aria-hidden', 'true')
-    requestAnimationFrame(() => closeButtonRef.current?.focus())
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.body.style.overflow = previousOverflow
-      if (appliance) {
-        if (!applianceWasInert) appliance.removeAttribute('inert')
-        if (previousAriaHidden == null) appliance.removeAttribute('aria-hidden')
-        else appliance.setAttribute('aria-hidden', previousAriaHidden)
-      }
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [onClose])
-
   return createPortal(
-    <div className={dark ? 'brew-selection-backdrop brew-selection-backdrop--dark' : 'brew-selection-backdrop'} onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section aria-labelledby="brew-selection-title" aria-modal="true" className="brew-selection-sheet" role="dialog">
-        <div aria-hidden="true" className="brew-selection-sheet__handle" />
-        <header className="brew-selection-sheet__header">
+    <div className={dark ? 'brew-selection-toast-container brew-selection-toast-container--dark' : 'brew-selection-toast-container'}>
+      <section aria-labelledby="brew-selection-title" className="brew-selection-toast" role="region">
+        <header className="brew-selection-toast__header">
           <div>
-            <span className="brew-selection-sheet__step">Brew setup</span>
+            <span className="brew-selection-toast__step">Brew setup</span>
             <h2 className="modal-title modal-title--selection" id="brew-selection-title">Choose your brew</h2>
             <p>Pick your coffee and recipe for this brew.</p>
           </div>
-          <button aria-label="Close brew selection" className="icon-button" onClick={onClose} ref={closeButtonRef} type="button"><X aria-hidden="true" /></button>
+          <button aria-label="Close brew selection" className="icon-button" onClick={onClose} type="button"><X aria-hidden="true" /></button>
         </header>
 
-        <div className="brew-selection-sheet__body">
+        <div className="brew-selection-toast__body">
           <section aria-labelledby="brew-selection-coffee-heading" className="brew-selection-section">
             <div className="brew-selection-section__heading"><div><span>01</span><h3 className="section-title section-title--selection" id="brew-selection-coffee-heading">Coffee beans</h3></div><small>Swipe to browse</small></div>
             <div aria-label="Coffee beans" className="brew-selection-rail">
@@ -98,10 +69,10 @@ export function BrewSelectionSheet({ dark, recipes, coffeeBags, selectedRecipeId
           </section>
         </div>
 
-        <footer className="brew-selection-sheet__footer">
-          {selectedRecipe ? <p className="brew-selection-sheet__summary"><strong>{selectedRecipe.name}</strong><span>{formatRecipeWeight(selectedRecipe.coffee)} g coffee · {formatTime(selectedRecipe.brewTime)}</span></p> : null}
-          <div className="brew-selection-sheet__footer-row">
-            <span className="brew-selection-sheet__footer-note">Your choices are applied when you prepare the brew.</span>
+        <footer className="brew-selection-toast__footer">
+          {selectedRecipe ? <p className="brew-selection-toast__summary"><strong>{selectedRecipe.name}</strong><span>{formatRecipeWeight(selectedRecipe.coffee)} g coffee · {formatTime(selectedRecipe.brewTime)}</span></p> : null}
+          <div className="brew-selection-toast__footer-row">
+            <span className="brew-selection-toast__footer-note">Your choices are applied when you prepare the brew.</span>
             <Button disabled={!selectedRecipe} onClick={() => selectedRecipe && onConfirm(selectedRecipe.id, draftCoffeeBagId)} type="button">Prepare brew<Coffee aria-hidden="true" /></Button>
           </div>
         </footer>
