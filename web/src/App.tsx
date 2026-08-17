@@ -7,12 +7,14 @@ import { buildSchedule, createId, expectedRecipeYield, formatRecipeInput, format
 import { BrewGraph, brewMilestones, scheduledBrewMilestones } from './BrewGraph'
 import { completePairedTelemetry, liveScaleTelemetry, type BrewMachineState } from './brewMachine'
 import { BrewSelectionSheet } from './BrewSelectionSheet'
+import { BrewNotificationStack, useLiveBrewNotifications } from './BrewNotificationStack'
 import { tareBothScales } from './brewSession'
+import { isBrewNotificationContext } from './brewNotifications'
 import type { BrewMode, BrewRecipe, BrewRecord, BrewStatus, CoffeeBag as CoffeeBagRecord } from './brewTypes'
 import { CoffeeBagWorkspace } from './CoffeeBagWorkspace'
 import { defaultRecipes } from './defaultRecipes'
 import { loadBrewTrace, useLibrary } from './library'
-import { appHash, parseAppHash } from './navigation'
+import { appHash, parseAppHash, type AppTab } from './navigation'
 import { usePwaInstall } from './pwa'
 import type { BrewTraceBuffer, BrewTraceSample } from './trace'
 import type { DeviceTelemetry, MeasurementTelemetry, ScaleId, ScaleTelemetry, TargetId, TotalTelemetry } from './types'
@@ -501,9 +503,48 @@ interface DeviceWorkspaceProps {
   sendCommand: ReturnType<typeof useDevice>['sendCommand']
   saveWifi: ReturnType<typeof useDevice>['saveWifi']
   dualTare: DualTareControl
+  sound: boolean
+  onToggleSound: () => void
+  themePreference: ThemePreference
+  onThemePreferenceChange: (preference: ThemePreference) => void
+  canInstall: boolean
+  onInstall: () => void
+  historyCount: number
+  onClearHistory: () => Promise<void>
 }
 
-function DeviceWorkspace({ telemetry, connection, availability, lastUpdateAt, sendCommand, saveWifi, mockMode, dualTare }: DeviceWorkspaceProps) {
+interface SettingsControlsProps {
+  sound: boolean
+  onToggleSound: () => void
+  themePreference: ThemePreference
+  onThemePreferenceChange: (preference: ThemePreference) => void
+  canInstall: boolean
+  onInstall: () => void
+  historyCount: number
+  onClearHistory: () => Promise<void>
+  wifiEnabled: boolean
+  onOpenWifi: () => void
+}
+
+export function SettingsControls({ sound, onToggleSound, themePreference, onThemePreferenceChange, canInstall, onInstall, historyCount, onClearHistory, wifiEnabled, onOpenWifi }: SettingsControlsProps) {
+  return <div className="settings-sections">
+    <section className="settings-section" aria-labelledby="settings-connectivity">
+      <div><span>Connectivity</span><h2 id="settings-connectivity">Wi-Fi and device</h2><p>Manage the local connection used for live weighing and guided brewing.</p></div>
+      <Button disabled={!wifiEnabled} onClick={onOpenWifi} surface="device" type="button" variant="secondary"><Settings aria-hidden="true" />Wi-Fi settings</Button>
+    </section>
+    <section className="settings-section" aria-labelledby="settings-preferences">
+      <div><span>Preferences</span><h2 id="settings-preferences">Sound and appearance</h2></div>
+      <div className="settings-controls">
+        <button aria-pressed={sound} className="settings-choice" onClick={onToggleSound} type="button">{sound ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}<span>Brew sounds</span><small>{sound ? 'On' : 'Off'}</small></button>
+        <div className="theme-choice" aria-label="Theme preference" role="group"><span>Theme</span>{(['system', 'light', 'dark'] as const).map((preference) => <button aria-pressed={themePreference === preference} key={preference} onClick={() => onThemePreferenceChange(preference)} type="button">{preference[0].toUpperCase() + preference.slice(1)}</button>)}</div>
+      </div>
+    </section>
+    {canInstall ? <section className="settings-section settings-section--inline" aria-labelledby="settings-install"><div><span>App</span><h2 id="settings-install">Install PourFrame</h2><p>Add this local control surface to your home screen.</p></div><Button onClick={onInstall} surface="device" type="button" variant="secondary"><Download aria-hidden="true" />Install app</Button></section> : null}
+    <section className="settings-section settings-section--danger" aria-labelledby="settings-data"><div><span>Data management</span><h2 id="settings-data">Brew history</h2><p>Clearing history removes shared completed-brew records from PourFrame.</p></div><Button disabled={!historyCount} onClick={() => window.confirm('Clear all shared brew history?') && void onClearHistory()} surface="device" type="button" variant="secondary"><Trash2 aria-hidden="true" />Clear history</Button></section>
+  </div>
+}
+
+function DeviceWorkspace({ telemetry, connection, availability, lastUpdateAt, sendCommand, saveWifi, mockMode, dualTare, sound, onToggleSound, themePreference, onThemePreferenceChange, canInstall, onInstall, historyCount, onClearHistory }: DeviceWorkspaceProps) {
   const [calibrationChannel, setCalibrationChannel] = useState<ScaleId | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -540,13 +581,13 @@ function DeviceWorkspace({ telemetry, connection, availability, lastUpdateAt, se
         actions={<div className="header-status">
           <span className="hostname">pourframe.local</span>
           <span className={online ? 'connection connection--online' : 'connection connection--offline'}><i /> {availability === 'partial' ? 'One scale unavailable' : online ? 'Device online' : connection === 'connecting' ? 'Connecting' : availability === 'stale' ? 'Telemetry degraded' : 'Device offline'}</span>
-          <button className="settings-button" disabled={!commandsEnabled} onClick={() => setSettingsOpen(true)}><Settings /> Wi-Fi</button>
         </div>}
         className="device-workspace__heading device-workspace__header"
-        eyebrow="Device"
-        title="Scale and connectivity"
+        eyebrow="PourFrame"
+        title="Settings"
         variant="compact"
       />
+      <SettingsControls canInstall={canInstall} historyCount={historyCount} onClearHistory={onClearHistory} onInstall={onInstall} onOpenWifi={() => setSettingsOpen(true)} onThemePreferenceChange={onThemePreferenceChange} onToggleSound={onToggleSound} sound={sound} themePreference={themePreference} wifiEnabled={commandsEnabled} />
       <TotalWeightSection
         commandsEnabled={commandsEnabled}
         dualTare={dualTare}
@@ -964,23 +1005,40 @@ function HistoryBrewItem({ brew }: { brew: BrewRecord }) {
   </article>
 }
 
-function HistoryWorkspace({ brews, onClear }: { brews: BrewRecord[]; onClear: () => Promise<void> }) {
-  return <section className="history-workspace"><PageHeader actions={<Button disabled={!brews.length} onClick={() => window.confirm('Clear all shared brew history?') && void onClear()} variant="secondary">Clear history</Button>} className="history-workspace__header" eyebrow="Shared on PourFrame · latest five" title="Brew history" variant="compact" />{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <EmptyState description="Choose a recipe and coffee bag below, then prepare your first guided brew. Its result will be saved here." icon={<History aria-hidden="true" />} title="Take PourFrame for its first brew" variant="full" />}</section>
+function HistoryWorkspace({ brews }: { brews: BrewRecord[] }) {
+  return <section className="history-workspace"><PageHeader className="history-workspace__header" eyebrow="Shared on PourFrame · latest five" title="Brew history" variant="compact" />{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <EmptyState description="Choose a recipe and coffee bag below, then prepare your first guided brew. Its result will be saved here." icon={<History aria-hidden="true" />} title="Take PourFrame for its first brew" variant="full" />}</section>
 }
 
-function BrewDock({ recipe, coffeeBag, disabled, onAction, action }: { recipe: BrewRecipe; coffeeBag: CoffeeBagRecord | null; disabled: boolean; onAction: () => void; action: 'prepare' | 'fullscreen' | 'resume' }) {
-  const active = action !== 'prepare'
-  const label = action === 'prepare' ? 'Prepare brew' : action === 'resume' ? 'Resume brew' : 'Full screen'
-  return <aside aria-label={active ? 'Active brew controls' : 'Next brew'} className="brew-dock"><div className="brew-dock__selection"><span>{active ? action === 'resume' ? 'Brew paused' : 'Brew in progress' : 'Next brew'}</span><strong>{recipe.name}</strong><small>{coffeeBag ? `${coffeeBag.name} · ${coffeeBag.roastery}` : 'No coffee bag selected'}</small></div><Button disabled={disabled} onClick={onAction} type="button">{action === 'fullscreen' ? <Maximize2 aria-hidden="true" /> : <Play aria-hidden="true" />}{label}</Button></aside>
+export function IdleBrewDock({ tab, disabled, onPrepare }: { tab: AppTab; disabled: boolean; onPrepare: () => void }) {
+  return <aside aria-label="Brew navigation and preparation" className="brew-dock brew-dock--idle"><nav aria-label="Primary navigation">{([['history', 'History', History], ['beans', 'Beans', Coffee], ['recipes', 'Recipes', BookOpen]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><Button className="brew-dock__prepare" disabled={disabled} onClick={onPrepare} type="button"><Play aria-hidden="true" />Prepare brew</Button></aside>
 }
 
-function DeviceStatusBanner({ availability, browserNetwork, reconnectAttempt, onReconnect }: {
+function ActiveBrewStatus({ action, blocked, coffeeBag, onAction, recipe }: { action: 'fullscreen' | 'resume'; blocked: boolean; coffeeBag: CoffeeBagRecord | null; onAction: () => void; recipe: BrewRecipe }) {
+  const [open, setOpen] = useState(false)
+  const status = blocked ? 'Attention needed' : action === 'resume' ? 'Brew paused' : 'Brew in progress'
+  const description = blocked ? 'Reconnect both scales before resuming.' : coffeeBag ? `${recipe.name} · ${coffeeBag.name}` : recipe.name
+  const close = () => setOpen(false)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+    const onPointerDown = (event: MouseEvent) => { if (!(event.target as Element).closest('.active-brew-status')) close() }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('mousedown', onPointerDown)
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('mousedown', onPointerDown) }
+  }, [])
+  return <aside className="active-brew-status" onMouseEnter={() => setOpen(true)}>
+    <button aria-expanded={open} aria-label={status} className={blocked ? 'active-brew-status__trigger active-brew-status__trigger--attention' : 'active-brew-status__trigger'} onClick={() => setOpen(true)} onFocus={() => setOpen(true)} type="button"><i aria-hidden="true" /><span>{status}</span></button>
+    {open ? <div className="active-brew-status__popover" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}><strong>{status}</strong><span>{description}</span><Button disabled={blocked} onClick={onAction} type="button">{action === 'fullscreen' ? <Maximize2 aria-hidden="true" /> : <Play aria-hidden="true" />}{action === 'resume' ? 'Resume brew' : 'Full screen'}</Button></div> : null}
+  </aside>
+}
+
+function DeviceStatusBanner({ availability, browserNetwork, reconnectAttempt, onReconnect, suppress }: {
   availability: DeviceAvailability
   browserNetwork: BrowserNetworkState
   reconnectAttempt: number
   onReconnect: () => void
+  suppress?: boolean
 }) {
-  if (availability === 'online' && browserNetwork === 'online') return null
+  if (suppress || (availability === 'online' && browserNetwork === 'online')) return null
   const title = availability === 'offline'
     ? 'PourFrame device offline'
     : availability === 'connecting'
@@ -1126,28 +1184,39 @@ function App() {
     guided.pauseResume()
   }, [guided, openBrewFocus])
   const activeBrew = guided.status === 'brewing' || guided.status === 'paused'
-  const preparationDockVisible = (tab === 'history' || tab === 'beans' || tab === 'recipes') && guided.prepStage == null && !activeBrew && !brewFocusOpen && !brewSelectionOpen
-  const reentryDockVisible = activeBrew && !brewFocusOpen
+  const notificationState = useMemo(() => ({
+    active: isBrewNotificationContext(guided.prepStage, guided.status),
+    availability: device.availability,
+    connection: device.connection,
+    reconnectAttempt: device.reconnectAttempt,
+    telemetry: device.telemetry,
+    machine: guided.machine,
+    brewStatus: guided.status,
+    mode: guided.machine.mode,
+    prepStage: guided.prepStage,
+    deviceBlocked: guided.deviceBlocked,
+    message: guided.message,
+  }), [device.availability, device.connection, device.reconnectAttempt, device.telemetry, guided.deviceBlocked, guided.machine, guided.message, guided.prepStage, guided.status])
+  const liveBrewNotifications = useLiveBrewNotifications(notificationState, brewFocusFullscreenActive, device.reconnect)
+  const preparationDockVisible = guided.prepStage == null && !activeBrew && !brewFocusOpen && !brewSelectionOpen
+  const reentryStatusVisible = activeBrew && !brewFocusOpen
   const headerTitle = tab === 'brew' ? recipe.name : tab === 'beans' ? 'Beans' : tab === 'recipes' ? 'Recipes' : tab === 'device' ? 'Settings' : 'Brew history'
   const headerTitleVariant = tab === 'history' || tab === 'beans' || tab === 'recipes' ? 'library' : 'compact'
 
   return <main className="appliance" data-theme={dark ? 'dark' : 'light'}>
-    <header className="appliance-header"><h1 className={`page-title page-title--${headerTitleVariant} appliance-header__title`}><a href={tab === 'brew' ? '#history' : appHash(tab)}>{headerTitle}</a></h1><nav aria-label="Primary navigation">{([['history', 'History', History], ['beans', 'Beans', Coffee], ['recipes', 'Recipes', BookOpen]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><div className="appliance-actions"><a aria-current={tab === 'device' ? 'page' : undefined} aria-label="Settings" className={tab === 'device' ? 'settings-tab active' : 'settings-tab'} href="#device"><Scale aria-hidden="true" /><span>Settings</span></a><span className={online ? 'appliance-connection online' : 'appliance-connection'}><i />{device.availability === 'partial' ? 'One scale live' : online ? 'Scale live' : device.availability === 'stale' ? 'Telemetry stale' : device.connection === 'connecting' ? 'Finding scale' : 'Scale offline'}</span>{pwaInstall.canInstall ? <button className="install-app" onClick={() => void pwaInstall.install()} type="button"><Download aria-hidden="true" /><span>Install app</span></button> : null}<button aria-label={sound ? 'Mute brew sounds' : 'Enable brew sounds'} onClick={toggleSound}>{sound ? <Volume2 /> : <VolumeX />}</button><button aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={() => setThemePreference((current) => {
-      const currentDark = current === 'system' ? systemDark : current === 'dark'
-      return currentDark ? 'light' : 'dark'
-    })}>{dark ? <Sun /> : <Moon />}</button></div></header>
-    <DeviceStatusBanner availability={device.availability} browserNetwork={device.browserNetwork} reconnectAttempt={device.reconnectAttempt} onReconnect={device.reconnect} />
+    <header className="appliance-header"><h1 className={`page-title page-title--${headerTitleVariant} appliance-header__title`}><a href={tab === 'brew' ? '#history' : appHash(tab)}>{headerTitle}</a></h1><div className="appliance-actions"><a aria-current={tab === 'device' ? 'page' : undefined} aria-label="Settings" className={tab === 'device' ? 'settings-tab active' : 'settings-tab'} href="#device"><Settings aria-hidden="true" /><span>Settings</span></a>{reentryStatusVisible ? <ActiveBrewStatus action={guided.status === 'paused' ? 'resume' : 'fullscreen'} blocked={guided.status === 'paused' && (guided.deviceBlocked || !canStartDevice)} coffeeBag={coffeeBag} onAction={guided.status === 'paused' ? resumeInFocus : openBrewFocus} recipe={recipe} /> : null}</div></header>
+    <DeviceStatusBanner availability={device.availability} browserNetwork={device.browserNetwork} reconnectAttempt={device.reconnectAttempt} onReconnect={device.reconnect} suppress={notificationState.active} />
+    <BrewNotificationStack notifications={liveBrewNotifications.notifications} onDismiss={liveBrewNotifications.dismiss} onReconnect={liveBrewNotifications.reconnect} />
     {library.hasLegacy ? <div className="legacy-banner"><span>Browser-saved PourOver recipes were found.</span><button onClick={() => void library.importLegacy()}>Import to PourFrame</button></div> : null}
     {library.status !== 'ready' ? <div className={`library-status library-status--${library.status}`} role="status">{library.message}</div> : null}
     <div className="appliance-body">
       {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.liveTelemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} traceBuffer={guided.traceBuffer!} dualTare={dualTare} canStartDevice={canStartDevice} canResumeDevice={canStartDevice} deviceBlocked={guided.deviceBlocked} onStart={openBrewSelection} onPause={guided.pauseResume} onReset={guided.reset} onFinish={guided.finish} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} onOpenFocus={openBrewFocus} /> : null}
       {tab === 'beans' ? <CoffeeBagWorkspace bags={library.coffeeBags} onDelete={library.deleteCoffeeBag} onSave={library.saveCoffeeBag} onUse={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} /> : null}
       {tab === 'recipes' ? <RecipeWorkspace brews={library.brews} onDelete={async (id) => { await library.deleteRecipe(id); if (recipe.id === id) selectRecipe(library.recipes.find((item) => item.id !== id) ?? defaultRecipes[0]) }} onSave={library.saveRecipe} onSelect={selectRecipe} recipes={library.recipes} /> : null}
-      {tab === 'history' ? <HistoryWorkspace brews={library.brews} onClear={library.clearBrews} /> : null}
-      {tab === 'device' ? <DeviceWorkspace telemetry={device.liveTelemetry} connection={device.connection} availability={device.availability} lastUpdateAt={device.lastUpdateAt} sendCommand={device.sendCommand} saveWifi={device.saveWifi} mockMode={device.mockMode} dualTare={dualTare} /> : null}
+      {tab === 'history' ? <HistoryWorkspace brews={library.brews} /> : null}
+      {tab === 'device' ? <DeviceWorkspace availability={device.availability} canInstall={pwaInstall.canInstall} connection={device.connection} dualTare={dualTare} historyCount={library.brews.length} lastUpdateAt={device.lastUpdateAt} mockMode={device.mockMode} onClearHistory={library.clearBrews} onInstall={() => void pwaInstall.install()} onThemePreferenceChange={setThemePreference} onToggleSound={toggleSound} saveWifi={device.saveWifi} sendCommand={device.sendCommand} sound={sound} telemetry={device.liveTelemetry} themePreference={themePreference} /> : null}
     </div>
-    {preparationDockVisible ? <BrewDock action="prepare" coffeeBag={coffeeBag} disabled={!canStartDevice} onAction={openBrewSelection} recipe={recipe} /> : null}
-    {reentryDockVisible ? <BrewDock action={guided.status === 'paused' ? 'resume' : 'fullscreen'} coffeeBag={coffeeBag} disabled={guided.status === 'paused' && guided.deviceBlocked && !canStartDevice} onAction={guided.status === 'paused' ? resumeInFocus : openBrewFocus} recipe={recipe} /> : null}
+    {preparationDockVisible ? <IdleBrewDock disabled={!canStartDevice} onPrepare={openBrewSelection} tab={tab} /> : null}
     {brewSelectionOpen ? <BrewSelectionSheet coffeeBags={library.coffeeBags} dark={dark} onClose={() => setBrewSelectionOpen(false)} onConfirm={confirmBrewSelection} recipes={library.recipes} selectedCoffeeBagId={coffeeBagId} selectedRecipeId={recipe.id} /> : null}
     {brewFocusOpen && guided.prepStage ? <PreparationFocus dark={dark} fullscreenActive={brewFocusFullscreenActive} stage={guided.prepStage} message={guided.message} recipe={recipe} coffeeBag={coffeeBag} usableUpper={usableScale(device.liveTelemetry?.scales.upper)} usableLower={usableScale(device.liveTelemetry?.scales.lower)} onClose={closePreparationFocus} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} traceBuffer={guided.traceBuffer!} milestones={focusMilestones} /> : null}
     {brewFocusOpen && !guided.prepStage && (activeBrew || guided.status === 'complete') ? <ActiveBrewSummary dark={dark} elapsed={guided.elapsed} fullscreenActive={brewFocusFullscreenActive} machine={guided.machine} message={guided.message} milestones={focusMilestones} mode={guided.machine.mode} onEnd={guided.finish} onExit={() => closeBrewFocus(false)} onPauseResume={guided.pauseResume} onToggleSound={toggleSound} recipe={recipe} schedule={guided.schedule} sound={sound} status={guided.status} telemetry={device.liveTelemetry} traceBuffer={guided.traceBuffer!} /> : null}

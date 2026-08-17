@@ -161,7 +161,7 @@ export function EmptyState({ icon, title, description, variant = 'compact' }: Em
     <div className={classNames('empty-state', `empty-state--${variant}`)}>
       {icon}
       {variant === 'full'
-        ? <h3 className="section-title empty-state__title">{title}</h3>
+        ? <h2 className="section-title empty-state__title">{title}</h2>
         : <strong className="empty-state__title">{title}</strong>}
       {variant === 'full'
         ? <p className="empty-state__description">{description}</p>

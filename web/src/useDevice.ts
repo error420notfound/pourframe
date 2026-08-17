@@ -21,6 +21,7 @@ export type DeviceAvailability = 'connecting' | 'offline' | 'stale' | 'partial' 
 
 const telemetryWatchdogMs = 3000
 const telemetryPublicationMs = 500
+export const maxReconnectAttempts = 5
 
 interface PendingCommand {
   resolve: (ack: ProtocolAck) => void
@@ -518,6 +519,7 @@ export function useDevice(recipe: BrewRecipe) {
         setConnection('offline')
         reconnectAttemptRef.current += 1
         setReconnectAttempt(reconnectAttemptRef.current)
+        if (reconnectAttemptRef.current >= maxReconnectAttempts) return
         const delay = Math.min(1000 * 2 ** (reconnectAttemptRef.current - 1), 10_000)
         reconnectTimerRef.current = window.setTimeout(connect, delay)
       })

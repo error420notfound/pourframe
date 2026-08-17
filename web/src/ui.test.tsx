@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { IdleBrewDock, SettingsControls } from './App'
 import { Button, EmptyState, LibraryItemCard, Modal, PageHeader, SectionHeader } from './ui'
 
 describe('shared UI primitives', () => {
@@ -37,7 +38,7 @@ describe('shared UI primitives', () => {
 
     expect(compact).toContain('<strong class="empty-state__title">Nothing here</strong>')
     expect(compact).not.toContain('<h3')
-    expect(full).toContain('<h3 class="section-title empty-state__title">No history</h3>')
+    expect(full).toContain('<h2 class="section-title empty-state__title">No history</h2>')
   })
 
   it('keeps library-card open and star controls separate', () => {
@@ -50,5 +51,27 @@ describe('shared UI primitives', () => {
     expect(markup.match(/<button/g)).toHaveLength(2)
     expect(markup).toContain('class="library-card__open"')
     expect(markup).toContain('aria-label="Unstar House blend"')
+  })
+
+  it('renders the idle dock with active hash navigation and a disabled prepare action', () => {
+    const markup = renderToStaticMarkup(<IdleBrewDock disabled onPrepare={() => undefined} tab="history" />)
+
+    expect(markup).toContain('aria-label="Brew navigation and preparation"')
+    expect(markup).toContain('href="#history"')
+    expect(markup).toContain('aria-current="page"')
+    expect(markup).toContain('Prepare brew')
+    expect(markup).toContain('disabled=""')
+  })
+
+  it('keeps settings preferences and destructive history management explicit', () => {
+    const markup = renderToStaticMarkup(<SettingsControls canInstall={false} historyCount={0} onClearHistory={async () => undefined} onInstall={() => undefined} onOpenWifi={() => undefined} onThemePreferenceChange={() => undefined} onToggleSound={() => undefined} sound themePreference="system" wifiEnabled />)
+
+    expect(markup).toContain('Brew sounds')
+    expect(markup).toContain('aria-pressed="true"')
+    expect(markup).toContain('Theme preference')
+    expect(markup).toContain('Wi-Fi settings')
+    expect(markup).toContain('Clear history')
+    expect(markup).toContain('disabled=""')
+    expect(markup).not.toContain('Install PourFrame')
   })
 })
