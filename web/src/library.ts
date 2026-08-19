@@ -4,12 +4,13 @@ import { defaultRecipes } from './defaultRecipes'
 import { defaultCoffeeBags } from './defaultCoffeeBags'
 import { buildSchedule, migrateRecipe } from './brew'
 import { normalizeCoffeeBag } from './coffeeBag'
-import { decodeTrace, type BrewTraceSample } from './trace'
+import { decodeTrace, encodeTrace, type BrewTraceSample } from './trace'
 
 type LibraryStatus = 'loading' | 'ready' | 'cached' | 'error'
 interface ApiErrorBody { error?: { code?: string; message?: string } }
 
 const mockMode = import.meta.env.DEV && !import.meta.env.VITE_DEVICE_HOST
+const mockScenario = mockMode && typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('mock') ?? 'healthy' : 'device'
 const configuredHost = import.meta.env.VITE_DEVICE_HOST as string | undefined
 const apiBase = configuredHost ? `http://${configuredHost}` : ''
 const databaseName = 'pourframe-ui-v1'
@@ -26,6 +27,73 @@ interface CompletionResponse {
   coffee_bags: Collection<CoffeeBag>
   inventory_warning?: string
 }
+
+function seedMockHistoryData() {
+  const now = Date.now()
+  const recipes = [defaultRecipes[2], defaultRecipes[1], defaultRecipes[0], defaultRecipes[2]]
+  const names = ['Kalita comfort', 'Light roast clarity', 'Balanced V60', 'Weekend pulse brew']
+
+  const records = recipes.map((recipe, index) => {
+    const elapsedS = recipe.brewTime - index * 5
+    const schedule = buildSchedule(recipe)
+    const transitions = schedule.filter((step) => step.kind === 'pour').map((step, transitionIndex) => ({
+      transition_id: `mock-history-transition-${index}-${transitionIndex}`,
+      step_id: step.id,
+      scheduled_elapsed_ms: Math.round(step.start * 1000),
+      actual_elapsed_ms: Math.round((step.start + (transitionIndex % 2 === 0 ? 1.5 : -1)) * 1000),
+      actual_timestamp: new Date(now - (index + 1) * 86_400_000 + step.start * 1000).toISOString(),
+      outcome: 'automatic' as const,
+      cue: 'completed' as const,
+      reduced_confidence: false,
+    }))
+    const sampleCount = Math.round(elapsedS * 2) + 1
+    const samples: BrewTraceSample[] = Array.from({ length: sampleCount }, (_, sampleIndex) => {
+      const elapsedMs = Math.round(sampleIndex * 500)
+      const seconds = elapsedMs / 1000
+      const progress = Math.min(1, seconds / elapsedS)
+      const steppedProgress = Math.min(1, Math.floor(seconds / Math.max(1, elapsedS / (schedule.length - 1))) / (schedule.length - 1))
+      const total = recipe.water * (0.92 * progress + 0.08 * steppedProgress)
+      const upper = Math.max(0, recipe.coffee * (0.72 - progress * 0.62) + Math.sin(seconds / 8 + index) * 1.8)
+      const lower = total - upper
+      return {
+        elapsedMs,
+        upper,
+        lower,
+        total,
+        relativeUpper: upper - recipe.coffee,
+        relativeLower: lower,
+        stepWaterAdded: total,
+        pourRate: seconds > 0 && seconds < elapsedS ? Math.max(0, (total - recipe.water * (0.92 * Math.max(0, progress - 0.02))) * 2) : 0,
+        confidence: 0.92 - (sampleIndex % 9 === 0 ? 0.04 : 0),
+        flags: 63,
+        stepIndex: Math.min(schedule.length - 1, Math.floor(progress * (schedule.length - 1))),
+      }
+    })
+    const encoded = encodeTrace(samples)
+    const completedAt = new Date(now - (index + 1) * 86_400_000 - index * 3_600_000).toISOString()
+    const coffeeBag = defaultCoffeeBags[index % defaultCoffeeBags.length]
+    const brew: BrewRecord = {
+      id: `mock-history-${index + 1}`,
+      completed_at: completedAt,
+      elapsed_s: elapsedS,
+      recipe: { ...recipe, name: names[index] },
+      schedule,
+      baselines: [],
+      transitions,
+      final: { upper_g: 2.5 + index, lower_g: Math.round(recipe.water * (0.97 - index * 0.015) * 10) / 10, total_g: recipe.water, beverage_g: Math.round(recipe.water * (0.97 - index * 0.015) * 10) / 10 },
+      sensor_summary: { mode: 'device', samples: sampleCount, upper_available_frames: sampleCount, lower_available_frames: sampleCount, partial_frames: 0, confidence_min: 0.88, confidence_mean: 0.92, confidence_final: 0.94, final_state: 'DRAWDOWN', pair_status_counts: { synchronized: sampleCount, retained_peer: 0, unavailable: 0 } },
+      trace: encoded.metadata,
+      coffee_bag: (() => { const { remainingWeightG: _remaining, createdAt: _created, updatedAt: _updated, ...snapshot } = coffeeBag; return snapshot })(),
+      coffee_used_g: recipe.coffee,
+    }
+    mockTraces.set(brew.id, encoded.bytes)
+    return brew
+  })
+
+  mockBrews = { v: 1, revision: 1, items: records }
+}
+
+if (mockMode && mockScenario === 'historyData') seedMockHistoryData()
 
 export class LibraryApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message) }
