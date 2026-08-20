@@ -77,6 +77,21 @@ The versioned local API is:
 
 The device stores at most 24 coffee bags, 24 recipes, and the five newest completed brews. Each completed device-assisted brew has a versioned, checksum-validated 10 Hz binary trace containing absolute upper/lower/combined measurements, virtual step-relative values, pour rate, step index, and health flags. Browser `localStorage` is reserved for small versioned interface preferences; IndexedDB contains last-good collection caches and an outbox for a completion record, trace, and intended inventory deduction that could not immediately reach the ESP32.
 
+## Optional PourFrame Catalog
+
+The web app can discover reusable coffee profiles and brew recipes from the public [PourFrame Catalog](https://github.com/error420notfound/pourframe-catalog). Its default base URL is `https://raw.githubusercontent.com/error420notfound/pourframe-catalog/main/catalogue`. For local catalog development, override it before starting Vite:
+
+```powershell
+$env:VITE_CATALOG_BASE_URL = 'http://localhost:8080/catalogue'
+npm.cmd --prefix web run dev
+```
+
+Catalog access is intentionally optional. Beans, recipes, brew history, manual entry, brewing, and device connection continue to use only the existing local PourFrame APIs. The catalog is never required for those features and no credentials or tokens are sent to it.
+
+Catalog lists are lazy-loaded: the bean editor retrieves the roastery index, then only the selected roastery's coffee index, then only a selected coffee detail. The Recipes tab retrieves only the recipe index until a recipe is opened or added. Valid responses are kept separately in the browser's `pourframe-catalog-v1` IndexedDB database and are shown immediately on later visits while a background refresh runs. If a refresh fails, cached catalog data remains usable; if no cache exists, manual entry and saved local records remain available.
+
+Selecting catalog content never saves it automatically. A coffee profile is applied to the bag form only through its explicit Fill from catalog action, preserving bag-specific inventory fields. Adding a catalog recipe converts it to the existing local recipe format and saves it through `/api/recipes`, where the normal local validation, revision handling, and 24-recipe limit apply.
+
 Trace transfer is additive to the version 1 API:
 
 - `PUT /api/brew-traces?id=<brew-id>` with the packed binary trace

@@ -1,10 +1,14 @@
 import { StarIcon as Star, XMarkIcon as X } from '@heroicons/react/24/solid'
+import { gsap } from 'gsap'
 import {
   useEffect,
   useId,
+  useLayoutEffect,
+  useRef,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(' ')
@@ -127,6 +131,53 @@ export function Modal({ title, children, onClose, variant = 'default', closeLabe
       </section>
     </div>
   )
+}
+
+interface LibraryPanelProps {
+  title: string
+  children: ReactNode
+  actions: ReactNode
+  onEscape: () => void
+}
+
+/** A persistent, non-modal panel for library detail and editing flows. */
+export function LibraryPanel({ title, children, actions, onEscape }: LibraryPanelProps) {
+  const titleId = useId()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLElement>(null)
+
+  useLayoutEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const context = gsap.context(() => {
+      gsap.timeline()
+        .fromTo(containerRef.current, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.26, ease: 'power2.out' })
+        .fromTo(panelRef.current, { autoAlpha: 0, scale: 0.975, y: 22 }, { autoAlpha: 1, scale: 1, y: 0, duration: 0.34, ease: 'power3.out' }, 0)
+    }, containerRef)
+    return () => context.revert()
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onEscape()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onEscape])
+
+  const panel = (
+    <div className="library-panel-container" onMouseDown={(event) => event.target === event.currentTarget && onEscape()} ref={containerRef}>
+      <section aria-labelledby={titleId} className="library-panel" ref={panelRef} role="region">
+        <div aria-hidden="true" className="library-panel__handle" />
+        <header className="library-panel__header">
+          <h2 className="modal-title library-panel__title" id={titleId}>{title}</h2>
+          <div className="library-panel__actions">{actions}</div>
+        </header>
+        <div className="library-panel__body">{children}</div>
+      </section>
+    </div>
+  )
+
+  return typeof document === 'undefined' ? panel : createPortal(panel, document.body)
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

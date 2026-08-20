@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { IdleBrewDock, SettingsControls } from './App'
-import { Button, EmptyState, LibraryItemCard, Modal, PageHeader, SectionHeader } from './ui'
+import { Button, EmptyState, LibraryItemCard, LibraryPanel, Modal, PageHeader, SectionHeader } from './ui'
 
 describe('shared UI primitives', () => {
   it('keeps page and section titles semantic', () => {
@@ -22,6 +22,18 @@ describe('shared UI primitives', () => {
     expect(markup).toContain('class="modal-title"')
     expect(markup).toContain('aria-label="Close"')
     expect(markup).toContain('type="button"')
+  })
+
+  it('renders library panels as non-modal, action-first regions', () => {
+    const markup = renderToStaticMarkup(<LibraryPanel actions={<button aria-label="Save recipe" type="button">Save</button>} onEscape={() => undefined} title="House recipe"><p>Body</p></LibraryPanel>)
+    const labelledBy = markup.match(/aria-labelledby="([^"]+)"/)?.[1]
+
+    expect(labelledBy).toBeTruthy()
+    expect(markup).toContain('class="library-panel-container"')
+    expect(markup).toContain('class="library-panel"')
+    expect(markup).toContain(`id="${labelledBy}"`)
+    expect(markup).toContain('aria-label="Save recipe"')
+    expect(markup).not.toContain('aria-modal="true"')
   })
 
   it('maps button surfaces and variants without dropping native attributes', () => {
