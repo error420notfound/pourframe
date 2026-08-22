@@ -1,5 +1,4 @@
 import { catalogClient, catalogRecentlyUsed } from './catalog'
-import { warmRemoteFonts } from './remoteAssets'
 
 export type StartupPhase = 'idle' | 'restoring' | 'ready' | 'unavailable' | 'running' | 'complete' | 'offline' | 'conflict' | 'failed' | 'skipped'
 
@@ -112,11 +111,12 @@ export async function startOptionalWarming() {
   if (disabled || navigator.onLine === false || connection?.saveData || connection?.effectiveType === '2g' || connection?.effectiveType === 'slow-2g' || !await storageHasRoom()) {
     setStartupState('remoteWarm', 'skipped'); return
   }
+  const tasks: Promise<unknown>[] = []
+  if (catalogRecentlyUsed()) tasks.push(catalogClient.roasteries(), catalogClient.recipes())
+  if (!tasks.length) { setStartupState('remoteWarm', 'skipped'); return }
   setStartupState('remoteWarm', 'running')
   cacheDebug('capability:controlled-cache', { available: canUseControlledCaches(), secureContext: window.isSecureContext })
   try {
-    const tasks: Promise<unknown>[] = [warmRemoteFonts()]
-    if (catalogRecentlyUsed()) tasks.push(catalogClient.roasteries(), catalogClient.recipes())
     const results = await Promise.allSettled(tasks)
     setStartupState('remoteWarm', results.some((result) => result.status === 'fulfilled' && result.value !== false) ? 'complete' : 'failed')
   } catch { setStartupState('remoteWarm', 'failed') }

@@ -6,8 +6,8 @@
   "assets": [
     {
       "path": "fonts/oswald.css",
-      "bytes": 1856,
-      "sha256": "5ccc6a7c61292d9cda3dfa01956baacb6e5eac2f5f28879f9ea8a521048026b8",
+      "bytes": 1857,
+      "sha256": "ff7f4e1b015bc0ad5dddcb2d011b18931c181960b5afe8ff37cd7153b9d63d04",
       "fallback": "Arial Narrow, Roboto Condensed, ui-sans-serif, system-ui, sans-serif",
       "source": "@fontsource-variable/oswald 5.3.0",
       "license": "fonts/LICENSE-OSWALD"

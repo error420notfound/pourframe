@@ -2,13 +2,11 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { registerPourFrameServiceWorker } from './pwa'
-import { installRemoteFonts } from './remoteAssets'
 import { warmFunctionalAudio } from './audio'
 import { beginStartup, cacheDebug, markShellReady, startOptionalWarming } from './startup'
 import './styles.css'
 
 beginStartup()
-installRemoteFonts()
 registerPourFrameServiceWorker()
 
 createRoot(document.getElementById('root')!).render(

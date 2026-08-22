@@ -2,7 +2,7 @@ name: Deploy GitHub Pages
 
 on:
   push:
-    branches: [improving-ux]
+    branches: [main, 'new-ui-#2']
   workflow_dispatch:
 
 permissions:
