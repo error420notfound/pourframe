@@ -2,7 +2,7 @@
 
 Pourframe is a local-first dual-scale coffee weighing controller for the Vicharak Shrike-Fi (ESP32-S3). It reads two independent HX711 converters, serves a responsive web interface from LittleFS, provisions Wi-Fi through a captive portal, and publishes telemetry over WebSocket.
 
-The hosted application also provides shared recipes, coffee-bag inventory, guided brew preparation, acknowledged device tare/target setup, partial-scale and timer-only fallbacks, a live brewing timer, and completed brew summaries. All runtime assets and data stay on the local device; the application has no cloud or CDN dependency.
+The hosted application also provides shared recipes, coffee-bag inventory, guided brew preparation, acknowledged device tare/target setup, partial-scale and timer-only fallbacks, a live brewing timer, and completed brew summaries. The functional application, device APIs, and user data stay local. Optional fonts and decorative onboarding images may use an immutable CDN URL, but every remote asset has a local fallback and no device workflow depends on the CDN.
 
 Measurement acquisition runs in a dedicated paired-reader task. A hardware-independent pipeline provides median spike rejection, calibration validity, slope/range history, stable/active/drawdown/uncertain states, a common time-normalized EMA, total conservation, health diagnostics, and confidence. See [the measurement pipeline guide](docs/measurement-pipeline.md) for capture, replay, calibration, and physical release gates.
 
@@ -39,6 +39,40 @@ npm.cmd --prefix web run build
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e hx711-diagnostics
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e shrike-fi
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e shrike-fi -t buildfs
+```
+
+### Hybrid web assets
+
+The ESP filesystem always contains the application shell, JavaScript and CSS, Geist fonts, brewing audio, tour code, favicons, compact 192/512 PourFrame icons, and a lightweight onboarding placeholder. Oswald and the three decorative onboarding photographs are optional remote enhancements. The original 1254×1254 PourFrame icon is retained with the hosted sources but is not requested by the shell.
+
+The verified fallback-only production build stores 839,255 bytes across 21 files, down from the 1,986,308-byte baseline by 1,147,053 bytes (57.75%). Direct `mklittlefs` builds succeed for both the original 1,572,864-byte partition and the current 3,014,656-byte partition. The expanded `partitions/pourframe_8MB.csv` layout remains in use so the frontend does not consume space reserved for `/user` recipes, bags, history, and traces.
+
+`VITE_REMOTE_ASSET_BASE_URL` is the only remote-asset build setting. It defaults to empty, which is safe for development and produces a fully usable fallback-only build without remote requests. Production values must use this exact SHA-pinned shape; Vite rejects mutable branches, tags, version ranges, `main`, and `latest`:
+
+```powershell
+$assetCommit = (git rev-parse HEAD).Trim()
+$env:VITE_REMOTE_ASSET_BASE_URL = "https://cdn.jsdelivr.net/gh/error420notfound/pourframe@$assetCommit/web/remote-assets/v1"
+npm.cmd --prefix web run build
+```
+
+Only use a commit that has been pushed and contains `web/remote-assets/v1`. The existing Pages workflow supplies its pushed `${{ github.sha }}` automatically. Remote files and checksums are recorded in [`web/remote-assets/v1/manifest.json`](web/remote-assets/v1/manifest.json).
+
+The service worker precaches only same-origin shell and fallback files. It cache-first serves successful CORS responses under the configured immutable remote prefix, but remote failure is allowed to reach the page so images switch to the local SVG and headings keep the system-font stack. APIs, WebSockets, catalog resources, and unrelated origins are never intercepted by this remote cache. Service workers do not run for a normal insecure `http://pourframe.local` origin; on the device, offline reliability comes from the local LittleFS files, while ordinary browser HTTP caching may still reuse optional remote resources.
+
+#### Publishing and updating remote assets
+
+1. Enable immutable releases for the GitHub repository. Add changed files under a new directory such as `web/remote-assets/v2`; never replace an already published version directory.
+2. Update its manifest and checksums, commit and push the files, then create and publish an immutable GitHub release/tag at that commit.
+3. Check representative CDN headers and content before building firmware. Fonts must return the correct WOFF2 MIME type and `Access-Control-Allow-Origin: *`; images and CSS must also permit anonymous CORS requests.
+4. Build new firmware with `VITE_REMOTE_ASSET_BASE_URL` set to the full commit SHA and the new version directory.
+5. Keep every old version directory and immutable release. Already-flashed devices have their original base URL embedded in the web bundle and must be able to request it indefinitely.
+
+For example, after publishing:
+
+```powershell
+$base = "https://cdn.jsdelivr.net/gh/error420notfound/pourframe@<40-character-commit-sha>/web/remote-assets/v1"
+Invoke-WebRequest -Method Head "$base/fonts/files/oswald-latin-wght-normal.woff2"
+Invoke-WebRequest -Method Head "$base/images/onboarding/meet-pourframe.jpg"
 ```
 
 Upload the validation environment first. Do not calibrate until both channels produce changing raw readings, report a measured 10 Hz or 80 Hz cadence, and continue operating independently when the other channel is disconnected.
@@ -88,9 +122,9 @@ npm.cmd --prefix web run dev
 
 Catalog access is intentionally optional. Beans, recipes, brew history, manual entry, brewing, and device connection continue to use only the existing local PourFrame APIs. The catalog is never required for those features and no credentials or tokens are sent to it.
 
-Catalog lists are lazy-loaded: the bean editor retrieves the roastery index, then only the selected roastery's coffee index, then only a selected coffee detail. The Recipes tab retrieves only the recipe index until a recipe is opened or added. Valid responses are kept separately in the browser's `pourframe-catalog-v1` IndexedDB database and are shown immediately on later visits while a background refresh runs. If a refresh fails, cached catalog data remains usable; if no cache exists, manual entry and saved local records remain available.
+Catalog lists are lazy-loaded: the bean editor retrieves the roastery index, then only the selected roastery's coffee index, then only a selected coffee detail. The Recipes tab retrieves only the recipe index until a recipe is opened or added. Valid responses are kept separately in the browser's `pourframe-catalog-v1` IndexedDB database and are shown immediately on later visits; entries older than 24 hours refresh in the background. If a refresh fails, cached catalog data remains usable; if no cache exists, manual entry and saved local records remain available.
 
-Selecting catalog content never saves it automatically. A coffee profile is applied to the bag form only through its explicit Fill from catalog action, preserving bag-specific inventory fields. Adding a catalog recipe converts it to the existing local recipe format and saves it through `/api/recipes`, where the normal local validation, revision handling, and 24-recipe limit apply.
+Selecting catalog content never saves it automatically. A coffee profile is applied to the bag form only through its explicit Fill bag details action, preserving bag-specific inventory fields. Catalog price, availability, imagery, product links, and bag size stay discovery-only; bag size is offered as a separate original-weight suggestion. Adding a catalog recipe converts it to the existing local recipe format and saves it through `/api/recipes`, where the normal local validation, revision handling, and 24-recipe limit apply.
 
 Trace transfer is additive to the version 1 API:
 
@@ -99,7 +133,7 @@ Trace transfer is additive to the version 1 API:
 
 The trace is uploaded idempotently before its summary is committed. Committing a sixth brew removes the oldest summary and matching trace together.
 
-**Back up shared data before uploading a new filesystem image.** The selected single-LittleFS layout contains both the generated frontend and `/user`; `uploadfs` replaces that partition and can erase recipes and brew history. Normal firmware builds and OTA application updates do not perform an `uploadfs` operation.
+**Back up shared data before uploading a new filesystem image.** The selected single-LittleFS layout contains both the generated frontend and `/user`; `uploadfs` replaces that partition and can erase recipes and brew history. Normal firmware builds and OTA application updates do not perform an `uploadfs` operation. The custom 8 MB layout gives LittleFS 2.875 MB so the generated app, including local fonts, fits alongside user data.
 
 ## Guided brew safety
 

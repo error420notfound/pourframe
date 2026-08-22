@@ -1,15 +1,8 @@
 const CACHE_PREFIX = 'pourframe-shell-'
 const CACHE_NAME = `${CACHE_PREFIX}__POURFRAME_CACHE_VERSION__`
-const SHELL_URLS = [
-  './',
-  './index.html',
-  './manifest.webmanifest',
-  './favicon.ico',
-  './favicon-16x16.png',
-  './favicon-32x32.png',
-  './apple-touch-icon.png',
-  './assets/pourover-icon-master.png',
-]
+const REMOTE_CACHE_NAME = 'pourframe-remote-assets-v1'
+const REMOTE_ASSET_BASE_URL = __POURFRAME_REMOTE_ASSET_BASE_URL__
+const SHELL_URLS = __POURFRAME_SHELL_URLS__
 
 function isApiRequest(url) {
   return url.pathname === '/api' || url.pathname.startsWith('/api/')
@@ -22,9 +15,15 @@ function isStaticRequest(request, url) {
     request.destination === 'font' || request.destination === 'manifest'
 }
 
-async function cacheResponse(request, response) {
+function isRemoteAssetRequest(request, url) {
+  if (!REMOTE_ASSET_BASE_URL || request.method !== 'GET') return false
+  if (request.destination !== 'image' && request.destination !== 'font' && request.destination !== 'style') return false
+  return url.href.startsWith(`${REMOTE_ASSET_BASE_URL}/`)
+}
+
+async function cacheResponse(request, response, cacheName = CACHE_NAME) {
   if (response && response.ok && response.type !== 'opaque') {
-    const cache = await caches.open(CACHE_NAME)
+    const cache = await caches.open(cacheName)
     await cache.put(request, response.clone())
   }
   return response
@@ -45,6 +44,12 @@ async function staticResponse(request) {
   const cached = await caches.match(request)
   if (cached) return cached
   return cacheResponse(request, await fetch(request))
+}
+
+async function remoteAssetResponse(request) {
+  const cached = await caches.match(request)
+  if (cached) return cached
+  return cacheResponse(request, await fetch(request), REMOTE_CACHE_NAME)
 }
 
 self.addEventListener('install', (event) => {
@@ -71,6 +76,10 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || isApiRequest(url) || url.protocol === 'ws:' || url.protocol === 'wss:') return
   if (request.mode === 'navigate') {
     event.respondWith(navigationResponse(request))
+    return
+  }
+  if (isRemoteAssetRequest(request, url)) {
+    event.respondWith(remoteAssetResponse(request))
     return
   }
   if (isStaticRequest(request, url)) event.respondWith(staticResponse(request))

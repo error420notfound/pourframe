@@ -16,6 +16,7 @@ import {
 } from './coffeeBag'
 import type { CoffeeBag as CoffeeBagRecord } from './brewTypes'
 import { applyCatalogCoffeeToBag, catalogClient, filterCatalogCoffees, rankRoasteries, type CatalogCoffee, type CatalogCoffeeSummary, type CatalogRoasterySummary } from './catalog'
+import { CoffeeCatalogFields } from './CoffeeCatalogFields'
 import { Button, EmptyState, LibraryItemCard, LibraryPanel, PageHeader, SectionHeader } from './ui'
 
 const sortPreferenceKey = 'pourframe.coffeeBags.sort.v2'
@@ -115,7 +116,7 @@ function BagForm({ draft, setDraft }: { draft: CoffeeBagRecord; setDraft: (bag: 
   const customProcess = draft.processing.find((item) => !processingOptions.includes(item as typeof processingOptions[number])) ?? ''
   return <div className="bag-edit-form">
     <div className="bag-section"><div className="bag-section__heading"><span>Bag essentials</span><small>Required</small></div><div className="bag-form-grid">
-      <BagCatalogFields draft={draft} setDraft={setDraft} />
+      <CoffeeCatalogFields draft={draft} setDraft={setDraft} />
       <label className="recipe-field"><span>Roasted on</span><input type="date" value={draft.roastedOn} onChange={(event) => setDraft({ ...draft, roastedOn: event.target.value })} /></label>
       <label className="recipe-field"><span>Roast level</span><select value={draft.roastLevel} onChange={(event) => setDraft({ ...draft, roastLevel: event.target.value as CoffeeBagRecord['roastLevel'] })}>{roastLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
       <label className="recipe-field"><span>Bean form</span><select value={draft.beanForm} onChange={(event) => setDraft({ ...draft, beanForm: event.target.value as CoffeeBagRecord['beanForm'], grind: event.target.value === 'Whole bean' ? undefined : draft.grind ?? 'Medium' })}>{beanForms.map((form) => <option key={form}>{form}</option>)}</select></label>

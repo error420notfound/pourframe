@@ -19,15 +19,20 @@ test('selects only frontend text formats', () => {
 test('stamps the service-worker cache from generated frontend contents', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'pourframe-sw-version-'))
   try {
-    await writeFile(path.join(directory, 'sw.js'), "const CACHE='__POURFRAME_CACHE_VERSION__'\n")
+    const workerTemplate = "const CACHE='__POURFRAME_CACHE_VERSION__'\nconst REMOTE=__POURFRAME_REMOTE_ASSET_BASE_URL__\nconst SHELL=__POURFRAME_SHELL_URLS__\n"
+    await writeFile(path.join(directory, 'sw.js'), workerTemplate)
     await writeFile(path.join(directory, 'index.html'), '<main>one</main>')
-    const first = await stampServiceWorker(directory)
+    const pinned = `https://cdn.jsdelivr.net/gh/error420notfound/pourframe@${'a'.repeat(40)}/web/remote-assets/v1`
+    const first = await stampServiceWorker(directory, pinned)
     assert.match(first, /^[a-f0-9]{16}$/)
-    assert.match(await readFile(path.join(directory, 'sw.js'), 'utf8'), new RegExp(first))
+    const stamped = await readFile(path.join(directory, 'sw.js'), 'utf8')
+    assert.match(stamped, new RegExp(first))
+    assert.match(stamped, /\.\/index\.html/)
+    assert.match(stamped, new RegExp(pinned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
 
-    await writeFile(path.join(directory, 'sw.js'), "const CACHE='__POURFRAME_CACHE_VERSION__'\n")
+    await writeFile(path.join(directory, 'sw.js'), workerTemplate)
     await writeFile(path.join(directory, 'index.html'), '<main>two</main>')
-    const second = await stampServiceWorker(directory)
+    const second = await stampServiceWorker(directory, pinned)
     assert.notEqual(second, first)
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -54,7 +59,7 @@ test('recursively replaces eligible files and preserves compressed formats', asy
     const js = Buffer.from('console.log("PourFrame")'.repeat(20))
     const font = Buffer.from([0x77, 0x4f, 0x46, 0x32])
     const manifest = Buffer.from('{"name":"PourFrame"}')
-    const serviceWorker = Buffer.from("const CACHE='__POURFRAME_CACHE_VERSION__'")
+    const serviceWorker = Buffer.from("const CACHE='__POURFRAME_CACHE_VERSION__'\nconst REMOTE=__POURFRAME_REMOTE_ASSET_BASE_URL__\nconst SHELL=__POURFRAME_SHELL_URLS__")
     await writeFile(path.join(directory, 'index.html'), html)
     await writeFile(path.join(directory, 'assets', 'app.js'), js)
     await writeFile(path.join(directory, 'assets', 'font.woff2'), font)
@@ -69,6 +74,8 @@ test('recursively replaces eligible files and preserves compressed formats', asy
     assert.deepEqual(await readFile(path.join(directory, 'assets', 'font.woff2')), font)
     assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'manifest.webmanifest.gz'))), manifest)
     assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_CACHE_VERSION__/)
+    assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_REMOTE_ASSET_BASE_URL__/)
+    assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_SHELL_URLS__/)
 
     const totals = summarizeAssets(assets)
     assert.ok(totals.rawBytes >= html.length + js.length + font.length + manifest.length)

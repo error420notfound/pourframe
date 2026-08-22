@@ -3,9 +3,12 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { gzipSync } from 'node:zlib'
+import { validateRemoteAssetBaseUrl } from './remote-asset-config.mjs'
 
 const COMPRESSIBLE_EXTENSIONS = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest'])
 const CACHE_VERSION_TOKEN = '__POURFRAME_CACHE_VERSION__'
+const REMOTE_ASSET_BASE_TOKEN = '__POURFRAME_REMOTE_ASSET_BASE_URL__'
+const SHELL_URLS_TOKEN = '__POURFRAME_SHELL_URLS__'
 
 export function shouldCompress(filePath) {
   return !filePath.toLowerCase().endsWith('.gz') && COMPRESSIBLE_EXTENSIONS.has(path.extname(filePath).toLowerCase())
@@ -26,7 +29,7 @@ async function filesRecursively(directory) {
   return files
 }
 
-export async function stampServiceWorker(directory) {
+export async function stampServiceWorker(directory, configuredRemoteAssetBaseUrl = process.env.VITE_REMOTE_ASSET_BASE_URL ?? '') {
   const root = path.resolve(directory)
   const serviceWorkerPath = path.join(root, 'sw.js')
   let source
@@ -37,9 +40,18 @@ export async function stampServiceWorker(directory) {
     throw error
   }
   if (!source.includes(CACHE_VERSION_TOKEN)) throw new Error(`sw.js is missing ${CACHE_VERSION_TOKEN}`)
+  if (!source.includes(REMOTE_ASSET_BASE_TOKEN)) throw new Error(`sw.js is missing ${REMOTE_ASSET_BASE_TOKEN}`)
+  if (!source.includes(SHELL_URLS_TOKEN)) throw new Error(`sw.js is missing ${SHELL_URLS_TOKEN}`)
+
+  const remoteAssetBaseUrl = validateRemoteAssetBaseUrl(configuredRemoteAssetBaseUrl)
 
   const hash = createHash('sha256')
   const files = await filesRecursively(root)
+  const shellUrls = ['./', ...files
+    .filter((file) => file !== serviceWorkerPath)
+    .map((file) => `./${path.relative(root, file).split(path.sep).join('/')}`)]
+  hash.update(remoteAssetBaseUrl)
+  hash.update('\0')
   for (const file of files) {
     if (file === serviceWorkerPath) continue
     hash.update(path.relative(root, file).split(path.sep).join('/'))
@@ -48,7 +60,10 @@ export async function stampServiceWorker(directory) {
     hash.update('\0')
   }
   const version = hash.digest('hex').slice(0, 16)
-  await writeFile(serviceWorkerPath, source.replaceAll(CACHE_VERSION_TOKEN, version))
+  await writeFile(serviceWorkerPath, source
+    .replaceAll(CACHE_VERSION_TOKEN, version)
+    .replaceAll(REMOTE_ASSET_BASE_TOKEN, JSON.stringify(remoteAssetBaseUrl))
+    .replaceAll(SHELL_URLS_TOKEN, JSON.stringify(shellUrls)))
   return version
 }
 

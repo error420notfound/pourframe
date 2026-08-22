@@ -1,7 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import guidedBrewImage from './assets/onboarding/guided-brew.jpg'
-import meetPourFrameImage from './assets/onboarding/meet-pourframe.jpg'
-import twoScalesImage from './assets/onboarding/two-scales.jpg'
+import { localAssetUrl, RemoteAssetImage } from './remoteAssets'
 
 export type OnboardingStatus = 'unseen' | 'skipped' | 'completed'
 export type OnboardingLaunch = 'automatic' | 'settings'
@@ -25,21 +23,23 @@ export function writeOnboardingStatus(status: Exclude<OnboardingStatus, 'unseen'
 
 const introCards = [
   {
-    image: meetPourFrameImage,
+    image: 'images/onboarding/meet-pourframe.jpg',
     title: 'Meet PourFrame',
     description: 'A calmer way to brew with live guidance from your coffee, recipe, and two connected scales.',
   },
   {
-    image: twoScalesImage,
+    image: 'images/onboarding/two-scales.jpg',
     title: 'Two scales, one clear picture',
     description: 'The upper scale follows the dripper. The lower scale follows the carafe. Together they track water in and coffee out.',
   },
   {
-    image: guidedBrewImage,
+    image: 'images/onboarding/guided-brew.jpg',
     title: 'Ready when you are',
     description: 'Keep beans and recipes together, then choose Prepare brew for step-by-step guidance.',
   },
 ] as const
+
+const onboardingFallbackImage = localAssetUrl('assets/onboarding-fallback.svg')
 
 interface OnboardingIntroProps {
   loading: boolean
@@ -92,7 +92,7 @@ export function OnboardingIntro({ loading, message, onSkip, onStartTour }: Onboa
 
   return <div className="onboarding-backdrop">
     <section aria-describedby={descriptionId} aria-labelledby={titleId} aria-modal="true" className="onboarding-dialog" ref={dialogRef} role="dialog">
-      <div className="onboarding-dialog__visual"><img alt="" src={card.image} /></div>
+      <div className="onboarding-dialog__visual"><RemoteAssetImage alt="" fallbackSrc={onboardingFallbackImage} remotePath={card.image} /></div>
       <div className="onboarding-dialog__content">
         <div className="onboarding-dialog__progress" aria-label={`Introduction step ${cardIndex + 1} of ${introCards.length}`}>
           {introCards.map((item, index) => <span aria-hidden="true" className={index === cardIndex ? 'active' : ''} key={item.title} />)}

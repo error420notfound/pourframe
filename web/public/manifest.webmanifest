@@ -9,14 +9,14 @@
   "background_color": "#fafdfa",
   "icons": [
     {
-      "src": "./apple-touch-icon.png",
-      "sizes": "180x180",
+      "src": "./assets/pwa-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./assets/pourover-icon-master.png",
-      "sizes": "1254x1254",
+      "src": "./assets/pwa-512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }

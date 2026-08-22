@@ -40,14 +40,14 @@ describe('onboarding preferences', () => {
 })
 
 describe('onboarding introduction', () => {
-  it('renders the first card as an accessible modal with a decorative local image', () => {
+  it('renders the first card as an accessible modal with a decorative local fallback', () => {
     const markup = renderToStaticMarkup(<OnboardingIntro loading={false} message="" onSkip={() => undefined} onStartTour={() => undefined} />)
 
     expect(markup).toContain('aria-modal="true"')
     expect(markup).toContain('role="dialog"')
     expect(markup).toContain('Meet PourFrame')
     expect(markup).toContain('Introduction step 1 of 3')
-    expect(markup).toMatch(/<img alt="" src="[^\"]+meet-pourframe\.jpg"\/?>/)
+    expect(markup).toMatch(/<img alt="" src="[^\"]+onboarding-fallback\.svg"\/?>/)
     expect(markup).toContain('Skip for now')
     expect(markup).toContain('Next')
   })

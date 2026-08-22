@@ -1,10 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import '@fontsource-variable/oswald'
 import App from './App'
 import { registerPourFrameServiceWorker } from './pwa'
+import { installRemoteFonts } from './remoteAssets'
 import './styles.css'
 
+installRemoteFonts()
 registerPourFrameServiceWorker()
 
 createRoot(document.getElementById('root')!).render(

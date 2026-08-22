@@ -6,13 +6,19 @@ import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 
 const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public/sw.js')
-const serviceWorkerSource = (await readFile(scriptPath, 'utf8')).replaceAll('__POURFRAME_CACHE_VERSION__', 'test-version')
+const remoteBase = `https://cdn.jsdelivr.net/gh/error420notfound/pourframe@${'a'.repeat(40)}/web/remote-assets/v1`
+const shellUrls = ['./', './index.html', './assets/app.js', './assets/onboarding-fallback.svg', './assets/pwa-192.png', './assets/pwa-512.png']
+const serviceWorkerSource = (await readFile(scriptPath, 'utf8'))
+  .replaceAll('__POURFRAME_CACHE_VERSION__', 'test-version')
+  .replaceAll('__POURFRAME_REMOTE_ASSET_BASE_URL__', JSON.stringify(remoteBase))
+  .replaceAll('__POURFRAME_SHELL_URLS__', JSON.stringify(shellUrls))
 
 function runtime({ fetchImpl = async () => new Response('network'), matches = new Map(), cacheNames = [] } = {}) {
   const listeners = new Map()
   const deleted = []
   const added = []
   const stored = []
+  const opened = []
   let skipped = false
   let claimed = false
   const cache = {
@@ -20,7 +26,7 @@ function runtime({ fetchImpl = async () => new Response('network'), matches = ne
     put: async (request, response) => { stored.push({ request, response }) },
   }
   const caches = {
-    open: async () => cache,
+    open: async (name) => { opened.push(name); return cache },
     keys: async () => cacheNames,
     delete: async (name) => { deleted.push(name); return true },
     match: async (request) => matches.get(typeof request === 'string' ? request : request.url),
@@ -32,7 +38,7 @@ function runtime({ fetchImpl = async () => new Response('network'), matches = ne
     clients: { claim: async () => { claimed = true } },
   }
   vm.runInNewContext(serviceWorkerSource, { self, caches, fetch: fetchImpl, URL, Response, Promise })
-  return { listeners, deleted, added, stored, state: () => ({ skipped, claimed }) }
+  return { listeners, deleted, added, opened, stored, state: () => ({ skipped, claimed }) }
 }
 
 async function dispatchExtendable(listener) {
@@ -50,10 +56,8 @@ async function dispatchFetch(listener, request) {
 test('installs the local shell and removes older PourFrame caches on activation', async () => {
   const value = runtime({ cacheNames: ['pourframe-shell-old', 'pourframe-shell-test-version', 'unrelated'] })
   await dispatchExtendable(value.listeners.get('install'))
-  assert.deepEqual(value.added, [
-    './', './index.html', './manifest.webmanifest', './favicon.ico', './favicon-16x16.png',
-    './favicon-32x32.png', './apple-touch-icon.png', './assets/pourover-icon-master.png',
-  ])
+  assert.deepEqual(value.added, shellUrls)
+  assert.equal(value.added.some((url) => url.startsWith('https://')), false)
   assert.equal(value.state().skipped, true)
 
   await dispatchExtendable(value.listeners.get('activate'))
@@ -91,4 +95,41 @@ test('serves cached static assets before going to the network', async () => {
   const response = await dispatchFetch(value.listeners.get('fetch'), request)
   assert.equal(await response.text(), 'cached script')
   assert.equal(fetches, 0)
+})
+
+test('serves cached remote assets before going to the network', async () => {
+  let fetches = 0
+  const request = { method: 'GET', mode: 'cors', destination: 'image', url: `${remoteBase}/images/onboarding/meet-pourframe.jpg` }
+  const value = runtime({
+    fetchImpl: async () => { fetches += 1; return new Response('network') },
+    matches: new Map([[request.url, new Response('cached remote image')]]),
+  })
+
+  const response = await dispatchFetch(value.listeners.get('fetch'), request)
+  assert.equal(await response.text(), 'cached remote image')
+  assert.equal(fetches, 0)
+})
+
+test('caches successful remote CORS assets without adding them to the shell', async () => {
+  const request = { method: 'GET', mode: 'cors', destination: 'font', url: `${remoteBase}/fonts/files/oswald-latin-wght-normal.woff2` }
+  const value = runtime({ fetchImpl: async () => new Response('font') })
+
+  const response = await dispatchFetch(value.listeners.get('fetch'), request)
+  assert.equal(await response.text(), 'font')
+  assert.equal(value.opened.at(-1), 'pourframe-remote-assets-v1')
+  assert.equal(value.stored.length, 1)
+})
+
+test('lets remote failures reject so the page can use its local fallback', async () => {
+  const request = { method: 'GET', mode: 'cors', destination: 'image', url: `${remoteBase}/images/onboarding/two-scales.jpg` }
+  const value = runtime({ fetchImpl: async () => { throw new Error('offline') } })
+
+  await assert.rejects(dispatchFetch(value.listeners.get('fetch'), request), /offline/)
+})
+
+test('does not intercept unrelated cross-origin images or catalog traffic', async () => {
+  const value = runtime()
+  const listener = value.listeners.get('fetch')
+  assert.equal(await dispatchFetch(listener, { method: 'GET', mode: 'cors', destination: 'image', url: 'https://catalog.example/coffee.jpg' }), null)
+  assert.equal(await dispatchFetch(listener, { method: 'GET', mode: 'cors', destination: 'style', url: 'https://cdn.example/styles.css' }), null)
 })

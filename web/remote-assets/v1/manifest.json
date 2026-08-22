@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "assetVersion": "v1",
+  "hostingPath": "web/remote-assets/v1",
+  "immutableBaseUrlTemplate": "https://cdn.jsdelivr.net/gh/error420notfound/pourframe@<40-character-commit-sha>/web/remote-assets/v1",
+  "assets": [
+    {
+      "path": "fonts/oswald.css",
+      "bytes": 1856,
+      "sha256": "5ccc6a7c61292d9cda3dfa01956baacb6e5eac2f5f28879f9ea8a521048026b8",
+      "fallback": "Arial Narrow, Roboto Condensed, ui-sans-serif, system-ui, sans-serif",
+      "source": "@fontsource-variable/oswald 5.3.0",
+      "license": "fonts/LICENSE-OSWALD"
+    },
+    {
+      "path": "fonts/files/oswald-cyrillic-ext-wght-normal.woff2",
+      "bytes": 19404,
+      "sha256": "ff62316167dc2f9cae9dea3707afcc4cf571b7f6744304ba45f2fbc40dd74179"
+    },
+    {
+      "path": "fonts/files/oswald-cyrillic-wght-normal.woff2",
+      "bytes": 15688,
+      "sha256": "9307b75d3508236a0bae4f29ee3d2ce9aee545120ec9ef29e2cd1187bf6b0e5b"
+    },
+    {
+      "path": "fonts/files/oswald-latin-ext-wght-normal.woff2",
+      "bytes": 23952,
+      "sha256": "7989ccc7770f5aeffa67e088bcd3b294d42fae2f8b0eca3c3c51b953d1f735cc"
+    },
+    {
+      "path": "fonts/files/oswald-latin-wght-normal.woff2",
+      "bytes": 28488,
+      "sha256": "bd73278ee0c50041b91b4c03d1229e35b501637f46b6409e7da2d3a758446ea5"
+    },
+    {
+      "path": "fonts/files/oswald-vietnamese-wght-normal.woff2",
+      "bytes": 7576,
+      "sha256": "ca8ab22d32ea765f3a8f7112b8bea5af717fa7f4b65fa3823ae4cf3d4a95189c"
+    },
+    {
+      "path": "images/onboarding/meet-pourframe.jpg",
+      "bytes": 81590,
+      "sha256": "968ecdbb8a3c7ca482e456badcb488502be9ba6d1e9f2a313ce1030690a8416e",
+      "fallback": "web/public/assets/onboarding-fallback.svg"
+    },
+    {
+      "path": "images/onboarding/two-scales.jpg",
+      "bytes": 98660,
+      "sha256": "7ffe07c76131fd42c6c66d3a6711ead92f9fb88ed24bb52bd1432c03728c8ef7",
+      "fallback": "web/public/assets/onboarding-fallback.svg"
+    },
+    {
+      "path": "images/onboarding/guided-brew.jpg",
+      "bytes": 120854,
+      "sha256": "957e00fbff605435a07f80fd61eec3fa1358c6a50b0fbf5e0a73f1170f87f79c",
+      "fallback": "web/public/assets/onboarding-fallback.svg"
+    },
+    {
+      "path": "images/pourover-icon-master.png",
+      "bytes": 798112,
+      "sha256": "693c5be325f35d884c2b67866280c22d87757a11494f5f91b0f7aaeeb8d7cc96",
+      "fallback": "web/public/assets/pwa-192.png and web/public/assets/pwa-512.png",
+      "usage": "hosted source master; not requested by the application shell"
+    }
+  ]
+}
