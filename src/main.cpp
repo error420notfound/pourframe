@@ -226,7 +226,10 @@ void setup() {
   delay(500);
   printBootDiagnostics();
 
-  if (!LittleFS.begin(false)) Serial.println("LittleFS mount failed; static UI and shared data will be unavailable");
+  // The custom partition table names the filesystem partition "littlefs".
+  // Arduino-ESP32 otherwise defaults to the legacy "spiffs" partition label.
+  if (!LittleFS.begin(false, "/littlefs", 10, "littlefs"))
+    Serial.println("LittleFS mount failed; static UI and shared data will be unavailable");
   else Serial.printf("LittleFS: used=%u total=%u bytes\n", LittleFS.usedBytes(), LittleFS.totalBytes());
 
   scalePreferences.begin("pourframe-scale", false);
