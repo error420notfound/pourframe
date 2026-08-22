@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpenIcon as BookOpen, BookmarkSquareIcon as Save, XMarkIcon as X } from '@heroicons/react/24/solid'
-import { catalogClient, catalogRecipeId, catalogRecipeToBrewRecipe, CATALOG_REPOSITORY_URL, filterCatalogRecipes, isNewCatalogRecipe, type CatalogRecipe, type CatalogRecipeSummary } from './catalog'
+import { catalogClient, catalogRecipeId, catalogRecipeToBrewRecipe, CATALOG_REPOSITORY_URL, filterCatalogRecipes, isNewCatalogRecipe, markCatalogUsed, type CatalogRecipe, type CatalogRecipeSummary } from './catalog'
 import { expectedRecipeYield, formatRecipeWeight, formatTime } from './brew'
 import type { BrewRecipe } from './brewTypes'
 import { EmptyState, LibraryPanel, SectionHeader } from './ui'
@@ -22,6 +22,7 @@ export function CatalogRecipes({ recipes, onSave }: { recipes: BrewRecipe[]; onS
   const detailAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    markCatalogUsed()
     const controller = new AbortController(); indexAbort.current = controller
     const load = async () => {
       try {

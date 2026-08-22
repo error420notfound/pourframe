@@ -15,7 +15,7 @@ import {
   type CoffeeBagSort,
 } from './coffeeBag'
 import type { CoffeeBag as CoffeeBagRecord } from './brewTypes'
-import { applyCatalogCoffeeToBag, catalogClient, filterCatalogCoffees, rankRoasteries, type CatalogCoffee, type CatalogCoffeeSummary, type CatalogRoasterySummary } from './catalog'
+import { applyCatalogCoffeeToBag, catalogClient, filterCatalogCoffees, markCatalogUsed, rankRoasteries, type CatalogCoffee, type CatalogCoffeeSummary, type CatalogRoasterySummary } from './catalog'
 import { CoffeeCatalogFields } from './CoffeeCatalogFields'
 import { Button, EmptyState, LibraryItemCard, LibraryPanel, PageHeader, SectionHeader } from './ui'
 
@@ -62,6 +62,7 @@ function BagCatalogFields({ draft, setDraft }: { draft: CoffeeBagRecord; setDraf
   const detailAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    markCatalogUsed()
     const controller = new AbortController(); roasteryAbort.current = controller
     const load = async () => {
       try {

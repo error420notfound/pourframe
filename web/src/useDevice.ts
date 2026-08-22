@@ -474,6 +474,7 @@ export function useDevice(recipe: BrewRecipe) {
 
       socket.addEventListener('open', () => {
         setConnection('connecting')
+        window.dispatchEvent(new Event('pourframe:device-reconnected'))
         if (telemetryTimerRef.current !== null) window.clearTimeout(telemetryTimerRef.current)
         telemetryTimerRef.current = window.setTimeout(() => socket.close(), 3000)
       })

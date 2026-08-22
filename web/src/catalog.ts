@@ -5,6 +5,11 @@ export const DEFAULT_CATALOG_BASE_URL = 'https://raw.githubusercontent.com/error
 export const CATALOG_REPOSITORY_URL = 'https://github.com/error420notfound/pourframe-catalog'
 export const CATALOG_TIMEOUT_MS = 5_000
 export const CATALOG_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1_000
+export const CATALOG_CACHE_EXPIRY_MS = 30 * 24 * 60 * 60 * 1_000
+const CATALOG_CACHE_MAX_BYTES = 5 * 1024 * 1024
+const CATALOG_COFFEE_DETAIL_LIMIT = 50
+const CATALOG_RECIPE_DETAIL_LIMIT = 25
+const catalogLastUsedKey = 'pourframe.catalog.last-used.v1'
 
 const roastLevels: RoastLevel[] = ['Light', 'Medium-light', 'Medium', 'Medium-dark', 'Dark']
 const grindSizes: GrindSize[] = ['Fine', 'Medium-fine', 'Medium', 'Medium-coarse', 'Coarse']
@@ -45,7 +50,7 @@ export interface CatalogRecipe {
   poursAfterBloom: number; brewTime: number; flowRate: number; temperature: number; agitation: string; equipment: string[]; notes: string; serveStyle: 'hot' | 'iced'
 }
 
-export interface CatalogCacheEntry<T> { data: T; responseUrl?: string; sourceUrl?: string; catalogVersion?: string; fetchedAt: string }
+export interface CatalogCacheEntry<T> { data: T; responseUrl?: string; sourceUrl?: string; catalogVersion?: string; fetchedAt: string; accessedAt?: string }
 export interface CatalogCache { get<T>(key: string): Promise<CatalogCacheEntry<T> | undefined>; set<T>(key: string, value: CatalogCacheEntry<T>): Promise<void> }
 export interface CatalogDependencies {
   fetch?: typeof fetch; cache?: CatalogCache; baseUrl?: string; timeoutMs?: number; cacheMaxAgeMs?: number; now?: () => number
@@ -274,8 +279,8 @@ export function validateCatalogRecipe(raw: unknown): CatalogRecipe {
 class IndexedDbCatalogCache implements CatalogCache {
   private open(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open('pourframe-catalog-v1', 1)
-      request.onupgradeneeded = () => request.result.createObjectStore('responses')
+      const request = indexedDB.open('pourframe-catalog-v1', 2)
+      request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains('responses')) request.result.createObjectStore('responses') }
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error)
     })
@@ -286,16 +291,55 @@ class IndexedDbCatalogCache implements CatalogCache {
       const request = database.transaction('responses').objectStore('responses').get(key)
       request.onsuccess = () => resolve(request.result as CatalogCacheEntry<T> | undefined)
       request.onerror = () => reject(request.error)
-    }).finally(() => database.close())
+    }).finally(() => database.close()).then(async (entry) => {
+      if (!entry) return undefined
+      if (Date.now() - Date.parse(entry.fetchedAt) > CATALOG_CACHE_EXPIRY_MS) { await this.delete(key).catch(() => undefined); return undefined }
+      void this.set(key, { ...entry, accessedAt: new Date().toISOString() }, false).catch(() => undefined)
+      return entry
+    })
   }
-  async set<T>(key: string, value: CatalogCacheEntry<T>): Promise<void> {
+  async set<T>(key: string, value: CatalogCacheEntry<T>, cleanup = true): Promise<void> {
     const database = await this.open()
     return new Promise<void>((resolve, reject) => {
       const request = database.transaction('responses', 'readwrite').objectStore('responses').put(value, key)
       request.onsuccess = () => resolve()
       request.onerror = () => reject(request.error)
     }).finally(() => database.close())
+    if (cleanup) await this.cleanup().catch(() => undefined)
   }
+  private async delete(key: string) {
+    const database = await this.open()
+    return new Promise<void>((resolve, reject) => {
+      const request = database.transaction('responses', 'readwrite').objectStore('responses').delete(key)
+      request.onsuccess = () => resolve(); request.onerror = () => reject(request.error)
+    }).finally(() => database.close())
+  }
+  private async cleanup() {
+    const database = await this.open()
+    const entries = await new Promise<Array<{ key: string; value: CatalogCacheEntry<unknown> }>>((resolve, reject) => {
+      const output: Array<{ key: string; value: CatalogCacheEntry<unknown> }> = []
+      const request = database.transaction('responses').objectStore('responses').openCursor()
+      request.onsuccess = () => { const cursor = request.result; if (!cursor) { resolve(output); return }; output.push({ key: String(cursor.key), value: cursor.value as CatalogCacheEntry<unknown> }); cursor.continue() }
+      request.onerror = () => reject(request.error)
+    }).finally(() => database.close())
+    const now = Date.now()
+    const sorted = entries.sort((a, b) => Date.parse(b.value.accessedAt ?? b.value.fetchedAt) - Date.parse(a.value.accessedAt ?? a.value.fetchedAt))
+    let total = 0; let coffees = 0; let recipes = 0
+    for (const entry of sorted) {
+      const bytes = new Blob([JSON.stringify(entry.value)]).size
+      const coffeeDetail = /\/coffees\/[^/]+\.json$/.test(entry.key)
+      const recipeDetail = /\/recipes\/[^/]+\.json$/.test(entry.key) && !entry.key.endsWith('/recipes/index.json')
+      if (coffeeDetail) coffees += 1
+      if (recipeDetail) recipes += 1
+      total += bytes
+      if (now - Date.parse(entry.value.fetchedAt) > CATALOG_CACHE_EXPIRY_MS || total > CATALOG_CACHE_MAX_BYTES || (coffeeDetail && coffees > CATALOG_COFFEE_DETAIL_LIMIT) || (recipeDetail && recipes > CATALOG_RECIPE_DETAIL_LIMIT)) await this.delete(entry.key)
+    }
+  }
+}
+
+export function markCatalogUsed(now = Date.now()) { try { localStorage.setItem(catalogLastUsedKey, String(now)) } catch { /* optional metadata */ } }
+export function catalogRecentlyUsed(now = Date.now()) {
+  try { const used = Number(localStorage.getItem(catalogLastUsedKey)); return Number.isFinite(used) && now - used <= CATALOG_CACHE_EXPIRY_MS } catch { return false }
 }
 
 function browserCache(): CatalogCache {

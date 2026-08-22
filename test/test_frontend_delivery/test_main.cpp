@@ -54,6 +54,9 @@ void testCacheControl() {
          "SPA fallback remains refreshable");
   expect(strcmp(frontend_delivery::cacheControlForPath("/assets/app.js", false), "max-age=3600") == 0,
          "static assets retain bounded caching");
+  expect(strcmp(frontend_delivery::cacheControlForPath("/assets/app-a1b2c3.js", false),
+                "public, max-age=31536000, immutable") == 0,
+         "hashed assets use immutable caching");
 }
 
 void testRepresentationSelection() {

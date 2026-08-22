@@ -27,6 +27,17 @@ export function installRemoteFonts(documentValue: Document | null = typeof docum
   return link
 }
 
+export async function warmRemoteFonts() {
+  const cssUrl = remoteAssetUrl('fonts/oswald.css')
+  if (!cssUrl) return false
+  try {
+    const response = await fetch(cssUrl, { mode: 'cors' })
+    if (!response.ok) return false
+    await document.fonts?.load?.('400 1rem "Oswald Variable"')
+    return true
+  } catch { return false }
+}
+
 interface RemoteAssetImageProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> {
   fallbackSrc: string
   remotePath: string

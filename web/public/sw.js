@@ -1,6 +1,9 @@
 const CACHE_PREFIX = 'pourframe-shell-'
 const CACHE_NAME = `${CACHE_PREFIX}__POURFRAME_CACHE_VERSION__`
-const REMOTE_CACHE_NAME = 'pourframe-remote-assets-v1'
+const REMOTE_CACHE_PREFIX = 'pourframe-remote-assets-'
+const REMOTE_CACHE_NAME = `${REMOTE_CACHE_PREFIX}__POURFRAME_REMOTE_CACHE_VERSION__`
+const REMOTE_CACHE_MAX_ENTRIES = 24
+const REMOTE_CACHE_MAX_BYTES = 8 * 1024 * 1024
 const REMOTE_ASSET_BASE_URL = __POURFRAME_REMOTE_ASSET_BASE_URL__
 const SHELL_URLS = __POURFRAME_SHELL_URLS__
 
@@ -25,6 +28,7 @@ async function cacheResponse(request, response, cacheName = CACHE_NAME) {
   if (response && response.ok && response.type !== 'opaque') {
     const cache = await caches.open(cacheName)
     await cache.put(request, response.clone())
+    if (cacheName === REMOTE_CACHE_NAME) await trimRemoteCache(cache)
   }
   return response
 }
@@ -46,6 +50,23 @@ async function staticResponse(request) {
   return cacheResponse(request, await fetch(request))
 }
 
+async function trimRemoteCache(cache) {
+  const requests = await cache.keys()
+  let total = 0
+  const sizes = []
+  for (const request of requests) {
+    const response = await cache.match(request)
+    const headerSize = Number(response && response.headers.get('content-length'))
+    const size = Number.isFinite(headerSize) && headerSize > 0 ? headerSize : response ? (await response.clone().arrayBuffer()).byteLength : 0
+    sizes.push({ request, size }); total += size
+  }
+  while (sizes.length > REMOTE_CACHE_MAX_ENTRIES || total > REMOTE_CACHE_MAX_BYTES) {
+    const oldest = sizes.shift()
+    if (!oldest) break
+    await cache.delete(oldest.request); total -= oldest.size
+  }
+}
+
 async function remoteAssetResponse(request) {
   const cached = await caches.match(request)
   if (cached) return cached
@@ -64,7 +85,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((names) => Promise.all(names
-        .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+        .filter((name) => (name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME) || (name.startsWith(REMOTE_CACHE_PREFIX) && name !== REMOTE_CACHE_NAME))
         .map((name) => caches.delete(name))))
       .then(() => self.clients.claim()),
   )

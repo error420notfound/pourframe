@@ -11,19 +11,24 @@ const shellUrls = ['./', './index.html', './assets/app.js', './assets/onboarding
 const serviceWorkerSource = (await readFile(scriptPath, 'utf8'))
   .replaceAll('__POURFRAME_CACHE_VERSION__', 'test-version')
   .replaceAll('__POURFRAME_REMOTE_ASSET_BASE_URL__', JSON.stringify(remoteBase))
+  .replaceAll('__POURFRAME_REMOTE_CACHE_VERSION__', 'test-remote')
   .replaceAll('__POURFRAME_SHELL_URLS__', JSON.stringify(shellUrls))
 
-function runtime({ fetchImpl = async () => new Response('network'), matches = new Map(), cacheNames = [] } = {}) {
+function runtime({ fetchImpl = async () => new Response('network'), matches = new Map(), cacheNames = [], cacheEntries = [] } = {}) {
   const listeners = new Map()
   const deleted = []
   const added = []
   const stored = []
   const opened = []
+  const evicted = []
   let skipped = false
   let claimed = false
   const cache = {
     addAll: async (urls) => { added.push(...urls) },
     put: async (request, response) => { stored.push({ request, response }) },
+    keys: async () => cacheEntries,
+    match: async (request) => matches.get(typeof request === 'string' ? request : request.url),
+    delete: async (request) => { evicted.push(request); return true },
   }
   const caches = {
     open: async (name) => { opened.push(name); return cache },
@@ -38,7 +43,7 @@ function runtime({ fetchImpl = async () => new Response('network'), matches = ne
     clients: { claim: async () => { claimed = true } },
   }
   vm.runInNewContext(serviceWorkerSource, { self, caches, fetch: fetchImpl, URL, Response, Promise })
-  return { listeners, deleted, added, opened, stored, state: () => ({ skipped, claimed }) }
+  return { listeners, deleted, added, opened, stored, evicted, state: () => ({ skipped, claimed }) }
 }
 
 async function dispatchExtendable(listener) {
@@ -116,8 +121,18 @@ test('caches successful remote CORS assets without adding them to the shell', as
 
   const response = await dispatchFetch(value.listeners.get('fetch'), request)
   assert.equal(await response.text(), 'font')
-  assert.equal(value.opened.at(-1), 'pourframe-remote-assets-v1')
+  assert.equal(value.opened.at(-1), 'pourframe-remote-assets-test-remote')
   assert.equal(value.stored.length, 1)
+})
+
+test('bounds the separately versioned remote runtime cache', async () => {
+  const cacheEntries = Array.from({ length: 25 }, (_, index) => ({ url: `${remoteBase}/images/${index}.png` }))
+  const matches = new Map(cacheEntries.map((request) => [request.url, new Response('x', { headers: { 'content-length': '1' } })]))
+  const request = { method: 'GET', mode: 'cors', destination: 'image', url: `${remoteBase}/images/new.png` }
+  const value = runtime({ cacheEntries, matches, fetchImpl: async () => new Response('new') })
+  await dispatchFetch(value.listeners.get('fetch'), request)
+  assert.equal(value.evicted.length, 1)
+  assert.equal(value.evicted[0], cacheEntries[0])
 })
 
 test('lets remote failures reject so the page can use its local fallback', async () => {

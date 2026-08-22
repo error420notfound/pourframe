@@ -8,6 +8,7 @@ import { validateRemoteAssetBaseUrl } from './remote-asset-config.mjs'
 const COMPRESSIBLE_EXTENSIONS = new Set(['.html', '.js', '.css', '.json', '.svg', '.webmanifest'])
 const CACHE_VERSION_TOKEN = '__POURFRAME_CACHE_VERSION__'
 const REMOTE_ASSET_BASE_TOKEN = '__POURFRAME_REMOTE_ASSET_BASE_URL__'
+const REMOTE_CACHE_VERSION_TOKEN = '__POURFRAME_REMOTE_CACHE_VERSION__'
 const SHELL_URLS_TOKEN = '__POURFRAME_SHELL_URLS__'
 
 export function shouldCompress(filePath) {
@@ -41,14 +42,19 @@ export async function stampServiceWorker(directory, configuredRemoteAssetBaseUrl
   }
   if (!source.includes(CACHE_VERSION_TOKEN)) throw new Error(`sw.js is missing ${CACHE_VERSION_TOKEN}`)
   if (!source.includes(REMOTE_ASSET_BASE_TOKEN)) throw new Error(`sw.js is missing ${REMOTE_ASSET_BASE_TOKEN}`)
+  if (!source.includes(REMOTE_CACHE_VERSION_TOKEN)) throw new Error(`sw.js is missing ${REMOTE_CACHE_VERSION_TOKEN}`)
   if (!source.includes(SHELL_URLS_TOKEN)) throw new Error(`sw.js is missing ${SHELL_URLS_TOKEN}`)
 
   const remoteAssetBaseUrl = validateRemoteAssetBaseUrl(configuredRemoteAssetBaseUrl)
 
   const hash = createHash('sha256')
   const files = await filesRecursively(root)
+  const criticalShellFile = (file) => {
+    const relative = path.relative(root, file).split(path.sep).join('/')
+    return relative === 'index.html' || relative === 'manifest.webmanifest' || relative === 'favicon.ico' || relative === 'favicon-16x16.png' || relative === 'favicon-32x32.png' || relative === 'apple-touch-icon.png' || relative === 'assets/pwa-192.png' || relative === 'assets/pwa-512.png' || relative === 'assets/onboarding-fallback.svg' || /^assets\/.*\.(?:js|css|woff2)$/.test(relative)
+  }
   const shellUrls = ['./', ...files
-    .filter((file) => file !== serviceWorkerPath)
+    .filter((file) => file !== serviceWorkerPath && criticalShellFile(file))
     .map((file) => `./${path.relative(root, file).split(path.sep).join('/')}`)]
   hash.update(remoteAssetBaseUrl)
   hash.update('\0')
@@ -60,9 +66,11 @@ export async function stampServiceWorker(directory, configuredRemoteAssetBaseUrl
     hash.update('\0')
   }
   const version = hash.digest('hex').slice(0, 16)
+  const remoteCacheVersion = createHash('sha256').update(remoteAssetBaseUrl || 'disabled').digest('hex').slice(0, 12)
   await writeFile(serviceWorkerPath, source
     .replaceAll(CACHE_VERSION_TOKEN, version)
     .replaceAll(REMOTE_ASSET_BASE_TOKEN, JSON.stringify(remoteAssetBaseUrl))
+    .replaceAll(REMOTE_CACHE_VERSION_TOKEN, remoteCacheVersion)
     .replaceAll(SHELL_URLS_TOKEN, JSON.stringify(shellUrls)))
   return version
 }

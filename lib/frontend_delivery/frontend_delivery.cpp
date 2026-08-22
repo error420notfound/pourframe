@@ -107,6 +107,10 @@ const char *contentTypeForPath(const char *path) {
 const char *cacheControlForPath(const char *path, bool spaFallback) {
   if (spaFallback || endsWithIgnoreCase(path, "/index.html") || endsWithIgnoreCase(path, "/sw.js") ||
       endsWithIgnoreCase(path, "/manifest.webmanifest")) return "no-cache";
+  const bool hashedAsset = strncmp(path, "/assets/", 8) == 0 && strchr(path, '-') != nullptr &&
+      (endsWithIgnoreCase(path, ".js") || endsWithIgnoreCase(path, ".css") || endsWithIgnoreCase(path, ".woff2") ||
+       endsWithIgnoreCase(path, ".wav"));
+  if (hashedAsset) return "public, max-age=31536000, immutable";
   return "max-age=3600";
 }
 

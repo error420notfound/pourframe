@@ -19,7 +19,7 @@ test('selects only frontend text formats', () => {
 test('stamps the service-worker cache from generated frontend contents', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'pourframe-sw-version-'))
   try {
-    const workerTemplate = "const CACHE='__POURFRAME_CACHE_VERSION__'\nconst REMOTE=__POURFRAME_REMOTE_ASSET_BASE_URL__\nconst SHELL=__POURFRAME_SHELL_URLS__\n"
+    const workerTemplate = "const CACHE='__POURFRAME_CACHE_VERSION__'\nconst REMOTE=__POURFRAME_REMOTE_ASSET_BASE_URL__\nconst REMOTE_CACHE='__POURFRAME_REMOTE_CACHE_VERSION__'\nconst SHELL=__POURFRAME_SHELL_URLS__\n"
     await writeFile(path.join(directory, 'sw.js'), workerTemplate)
     await writeFile(path.join(directory, 'index.html'), '<main>one</main>')
     const pinned = `https://cdn.jsdelivr.net/gh/error420notfound/pourframe@${'a'.repeat(40)}/web/remote-assets/v1`
@@ -58,24 +58,29 @@ test('recursively replaces eligible files and preserves compressed formats', asy
     const html = Buffer.from('<!doctype html><main>PourFrame</main>')
     const js = Buffer.from('console.log("PourFrame")'.repeat(20))
     const font = Buffer.from([0x77, 0x4f, 0x46, 0x32])
+    const audio = Buffer.from([0x52, 0x49, 0x46, 0x46])
     const manifest = Buffer.from('{"name":"PourFrame"}')
-    const serviceWorker = Buffer.from("const CACHE='__POURFRAME_CACHE_VERSION__'\nconst REMOTE=__POURFRAME_REMOTE_ASSET_BASE_URL__\nconst SHELL=__POURFRAME_SHELL_URLS__")
+    const serviceWorker = Buffer.from("const CACHE='__POURFRAME_CACHE_VERSION__'\nconst REMOTE=__POURFRAME_REMOTE_ASSET_BASE_URL__\nconst REMOTE_CACHE='__POURFRAME_REMOTE_CACHE_VERSION__'\nconst SHELL=__POURFRAME_SHELL_URLS__")
     await writeFile(path.join(directory, 'index.html'), html)
     await writeFile(path.join(directory, 'assets', 'app.js'), js)
     await writeFile(path.join(directory, 'assets', 'font.woff2'), font)
+    await writeFile(path.join(directory, 'assets', 'tick-test.wav'), audio)
     await writeFile(path.join(directory, 'manifest.webmanifest'), manifest)
     await writeFile(path.join(directory, 'sw.js'), serviceWorker)
 
     const assets = await precompressDirectory(directory)
     assert.deepEqual(await readdir(directory), ['assets', 'index.html.gz', 'manifest.webmanifest.gz', 'sw.js.gz'])
-    assert.deepEqual((await readdir(path.join(directory, 'assets'))).sort(), ['app.js.gz', 'font.woff2'])
+    assert.deepEqual((await readdir(path.join(directory, 'assets'))).sort(), ['app.js.gz', 'font.woff2', 'tick-test.wav'])
     assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'index.html.gz'))), html)
     assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'assets', 'app.js.gz'))), js)
     assert.deepEqual(await readFile(path.join(directory, 'assets', 'font.woff2')), font)
     assert.deepEqual(gunzipSync(await readFile(path.join(directory, 'manifest.webmanifest.gz'))), manifest)
-    assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_CACHE_VERSION__/)
-    assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_REMOTE_ASSET_BASE_URL__/)
-    assert.doesNotMatch(gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString(), /__POURFRAME_SHELL_URLS__/)
+    const stampedWorker = gunzipSync(await readFile(path.join(directory, 'sw.js.gz'))).toString()
+    assert.doesNotMatch(stampedWorker, /__POURFRAME_CACHE_VERSION__/)
+    assert.doesNotMatch(stampedWorker, /__POURFRAME_REMOTE_ASSET_BASE_URL__/)
+    assert.doesNotMatch(stampedWorker, /__POURFRAME_REMOTE_CACHE_VERSION__/)
+    assert.doesNotMatch(stampedWorker, /__POURFRAME_SHELL_URLS__/)
+    assert.doesNotMatch(stampedWorker, /tick-test\.wav/)
 
     const totals = summarizeAssets(assets)
     assert.ok(totals.rawBytes >= html.length + js.length + font.length + manifest.length)

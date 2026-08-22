@@ -30,9 +30,12 @@ function ensureInstallListeners() {
 export function registerPourFrameServiceWorker() {
   if (!import.meta.env.PROD || typeof window === 'undefined' || !window.isSecureContext || !('serviceWorker' in navigator)) return
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {
-      // The app remains fully usable when registration is unavailable.
-    })
+    void (async () => {
+      if (!('caches' in window)) return
+      const probe = 'pourframe-capability-probe'
+      try { await caches.open(probe); await caches.delete(probe) } catch { return }
+      await navigator.serviceWorker.register('./sw.js', { scope: './' })
+    })().catch(() => { /* The app remains fully usable when registration is unavailable. */ })
   }, { once: true })
 }
 

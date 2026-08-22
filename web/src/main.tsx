@@ -3,8 +3,11 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import { registerPourFrameServiceWorker } from './pwa'
 import { installRemoteFonts } from './remoteAssets'
+import { warmFunctionalAudio } from './audio'
+import { beginStartup, cacheDebug, markShellReady, startOptionalWarming } from './startup'
 import './styles.css'
 
+beginStartup()
 installRemoteFonts()
 registerPourFrameServiceWorker()
 
@@ -14,10 +17,8 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>,
 )
 
-const splash = document.getElementById('app-splash')
-if (splash) {
-  requestAnimationFrame(() => {
-    splash.classList.add('app-splash--hidden')
-    window.setTimeout(() => splash.remove(), 220)
-  })
-}
+requestAnimationFrame(() => {
+  markShellReady()
+  const schedule = window.requestIdleCallback ?? ((callback: IdleRequestCallback) => window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 }), 0))
+  schedule(() => { void warmFunctionalAudio().then((bytes) => cacheDebug('asset-warm:audio', { bytes })); void startOptionalWarming() }, { timeout: 2_000 })
+})

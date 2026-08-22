@@ -13,6 +13,19 @@ const cueUrls: Record<AudioCue, string> = {
   error: errorSound,
 }
 
+export async function warmFunctionalAudio(maxBytes = 512 * 1024) {
+  let scheduled = 0
+  for (const url of [...new Set(Object.values(cueUrls))]) {
+    if (scheduled >= maxBytes) break
+    try {
+      const response = await fetch(url)
+      const size = Number(response.headers.get('content-length') ?? 0)
+      scheduled += Number.isFinite(size) ? size : 0
+    } catch { /* Ordinary HTTP caching is opportunistic. */ }
+  }
+  return scheduled
+}
+
 let audioContext: AudioContext | null = null
 let masterGain: GainNode | null = null
 let audioEnabled = true
