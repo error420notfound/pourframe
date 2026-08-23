@@ -22,8 +22,19 @@
     <title>PourFrame</title>
     <style>
       :root {
+        --pf-radius-scale: 1;
         background: rgba(250, 253, 250, 1);
         background: color(display-p3 0.977 0.991 0.979);
+      }
+
+      @supports (corner-shape: squircle) {
+        :root {
+          --pf-radius-scale: 2;
+        }
+
+        :where(*) {
+          corner-shape: squircle;
+        }
       }
 
       :root[data-splash-theme='dark'] {
@@ -79,7 +90,7 @@
         width: min(38vw, 168px);
         height: min(38vw, 168px);
         object-fit: cover;
-        border-radius: 28px;
+        border-radius: calc(28px * var(--pf-radius-scale));
         box-shadow: 0 18px 48px rgba(17, 17, 17, 0.1);
         box-shadow: 0 18px 48px color(display-p3 0.043 0.071 0.052 / 0.1);
       }
