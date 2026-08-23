@@ -997,6 +997,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   --accent: color(display-p3 0.16 0.93 0.4);
 }
 
+/* Let dark-mode copy and icons accumulate light without blending layout surfaces. */
+:is(
+  .appliance[data-theme='dark'],
+  .active-brew-summary[data-theme='dark'],
+  body:has(.appliance[data-theme='dark']) .library-panel-container
+) :where(
+  h1, h2, h3, h4, h5, h6,
+  p, span, small, strong, b, em, i,
+  label, button, a, li, dt, dd,
+  legend, figcaption, caption, th, td,
+  summary, output, input, textarea, select,
+  svg
+) {
+  mix-blend-mode: plus-lighter;
+}
+
 .appliance button, .appliance input, .appliance textarea, .appliance select { font: inherit; }
 .appliance button { cursor: pointer; }
 .appliance button:disabled { cursor: not-allowed; opacity: 0.45; }
