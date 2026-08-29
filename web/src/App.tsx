@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { ArrowDownTrayIcon as Download, ArrowPathIcon as RefreshCw, ArrowUturnLeftIcon as RotateCcw, ArrowUpTrayIcon as FileUp, ArrowsPointingInIcon as Minimize2, ArrowsPointingOutIcon as Maximize2, BeakerIcon as Coffee, BookOpenIcon as BookOpen, BookmarkSquareIcon as Save, CheckCircleIcon as CheckCircle2, ChevronRightIcon as ChevronRight, ClockIcon as Clock3, ClockIcon as History, Cog6ToothIcon as Settings, EllipsisVerticalIcon as EllipsisVertical, MoonIcon as Moon, PauseIcon as Pause, PencilIcon as Pencil, PlayIcon as Play, QuestionMarkCircleIcon as CircleHelp, ScaleIcon as Scale, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StarIcon as Star, StopIcon as Square, SunIcon as Sun, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
 import { createPortal } from 'react-dom'
 import { ActiveBrewSummary } from './ActiveBrewSummary'
+import { ActiveBrewDock } from './ActiveBrewDock'
 import { setAudioEnabled } from './audio'
 import { buildSchedule, createId, expectedRecipeYield, formatRecipeInput, formatRecipeWeight, formatTime, migrateRecipe, normalizeRecipe, updateRecipeNumber, validateRecipe } from './brew'
+import { deriveActiveBrewSummary } from './brewSummaryModel'
 import { BrewGraph, brewMilestones, scheduledBrewMilestones } from './BrewGraph'
 import { completePairedTelemetry, liveScaleTelemetry, type BrewMachineState } from './brewMachine'
 import { BrewSelectionSheet } from './BrewSelectionSheet'
@@ -1037,26 +1039,14 @@ function HistoryWorkspace({ brews }: { brews: BrewRecord[] }) {
   return <section className="history-workspace"><PageHeader className="history-workspace__header" eyebrow="Shared on PourFrame · latest five" title="Brew history" variant="compact" />{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <EmptyState description="Choose a recipe and coffee bag below, then prepare your first guided brew. Its result will be saved here." icon={<History aria-hidden="true" />} title="Take PourFrame for its first brew" variant="full" />}</section>
 }
 
-export function IdleBrewDock({ tab, disabled, onPrepare }: { tab: AppTab; disabled: boolean; onPrepare: () => void }) {
-  return <aside aria-label="Brew navigation and preparation" className="brew-dock brew-dock--idle"><nav aria-label="Primary navigation">{([['history', 'History', History], ['beans', 'Beans', Coffee], ['recipes', 'Recipes', BookOpen]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><Button className="brew-dock__prepare" data-tour="prepare-brew" disabled={disabled} onClick={onPrepare} type="button"><Play aria-hidden="true" />Prepare brew</Button></aside>
+const progressiveBlurLayers = Array.from({ length: 6 }, (_, index) => index)
+
+function ProgressiveBlur({ className = '' }: { className?: string }) {
+  return <span aria-hidden="true" className={`progressive-blur${className ? ` ${className}` : ''}`}>{progressiveBlurLayers.map((layer) => <span key={layer} />)}</span>
 }
 
-function ActiveBrewStatus({ action, blocked, coffeeBag, onAction, recipe }: { action: 'fullscreen' | 'resume'; blocked: boolean; coffeeBag: CoffeeBagRecord | null; onAction: () => void; recipe: BrewRecipe }) {
-  const [open, setOpen] = useState(false)
-  const status = blocked ? 'Attention needed' : action === 'resume' ? 'Brew paused' : 'Brew in progress'
-  const description = blocked ? 'Reconnect both scales before resuming.' : coffeeBag ? `${recipe.name} · ${coffeeBag.name}` : recipe.name
-  const close = () => setOpen(false)
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
-    const onPointerDown = (event: MouseEvent) => { if (!(event.target as Element).closest('.active-brew-status')) close() }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('mousedown', onPointerDown)
-    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('mousedown', onPointerDown) }
-  }, [])
-  return <aside className="active-brew-status" onMouseEnter={() => setOpen(true)}>
-    <button aria-expanded={open} aria-label={status} className={blocked ? 'active-brew-status__trigger active-brew-status__trigger--attention' : 'active-brew-status__trigger'} onClick={() => setOpen(true)} onFocus={() => setOpen(true)} type="button"><i aria-hidden="true" /><span>{status}</span></button>
-    {open ? <div className="active-brew-status__popover" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) close() }}><strong>{status}</strong><span>{description}</span><Button disabled={blocked} onClick={onAction} type="button">{action === 'fullscreen' ? <Maximize2 aria-hidden="true" /> : <Play aria-hidden="true" />}{action === 'resume' ? 'Resume brew' : 'Full screen'}</Button></div> : null}
-  </aside>
+export function IdleBrewDock({ tab, disabled, onPrepare }: { tab: AppTab; disabled: boolean; onPrepare: () => void }) {
+  return <aside aria-label="Brew navigation and preparation" className="brew-dock brew-dock--idle"><nav aria-label="Primary navigation">{([['history', 'History', History], ['beans', 'Beans', Coffee], ['recipes', 'Recipes', BookOpen]] as const).map(([id, label, Icon]) => <a aria-current={tab === id ? 'page' : undefined} className={tab === id ? 'active' : ''} href={appHash(id)} key={id}><Icon aria-hidden="true" />{label}</a>)}</nav><Button className="brew-dock__prepare" data-tour="prepare-brew" disabled={disabled} onClick={onPrepare} type="button"><Play aria-hidden="true" />Prepare brew</Button></aside>
 }
 
 function DeviceStatusBanner({ availability, browserNetwork, reconnectAttempt, onReconnect, suppress }: {
@@ -1095,10 +1085,12 @@ function DeviceStatusBanner({ availability, browserNetwork, reconnectAttempt, on
 
 function App() {
   const [navigation, setNavigation] = useState(() => parseAppHash(window.location.hash))
+  const [headerCompact, setHeaderCompact] = useState(() => window.scrollY > 0)
   const { tab } = navigation
   const [recipe, setRecipe] = useState<BrewRecipe>(defaultRecipes[0])
   const device = useDevice(recipe)
   const library = useLibrary()
+  const [legacyNotificationDismissed, setLegacyNotificationDismissed] = useState(false)
   const pwaInstall = usePwaInstall()
   const [coffeeBagId, setCoffeeBagId] = useState<string | null>(() => {
     const stored = storedValue('pourframe.coffeeBag.selected.v1')
@@ -1159,6 +1151,18 @@ function App() {
     return () => window.removeEventListener('hashchange', syncNavigationFromHash)
   }, [])
   useEffect(() => {
+    let compact = window.scrollY > 0
+    const syncHeaderCompact = () => {
+      const next = window.scrollY > 0
+      if (next === compact) return
+      compact = next
+      setHeaderCompact(next)
+    }
+    syncHeaderCompact()
+    window.addEventListener('scroll', syncHeaderCompact, { passive: true })
+    return () => window.removeEventListener('scroll', syncHeaderCompact)
+  }, [])
+  useEffect(() => {
     if (coffeeBagId) storeValue('pourframe.coffeeBag.selected.v1', coffeeBagId)
     else if (coffeeBagSelectionInitialized.current) storeValue('pourframe.coffeeBag.selected.v1', '__none__')
   }, [coffeeBagId])
@@ -1211,10 +1215,6 @@ function App() {
     guided.setPrepStage(null)
     closeBrewFocus(true)
   }, [closeBrewFocus, guided])
-  const resumeInFocus = useCallback(() => {
-    openBrewFocus()
-    guided.pauseResume()
-  }, [guided, openBrewFocus])
   const activeBrew = guided.status === 'brewing' || guided.status === 'paused'
   const onboardingBlocked = activeBrew || guided.prepStage != null || brewFocusOpen || brewSelectionOpen
   const openOnboarding = useCallback(() => {
@@ -1244,16 +1244,19 @@ function App() {
     message: guided.message,
   }), [device.availability, device.connection, device.reconnectAttempt, device.telemetry, guided.deviceBlocked, guided.machine, guided.message, guided.prepStage, guided.status])
   const liveBrewNotifications = useLiveBrewNotifications(notificationState, brewFocusFullscreenActive, device.reconnect)
-  const preparationDockVisible = guided.prepStage == null && !activeBrew && !brewFocusOpen && !brewSelectionOpen
+  const persistentNotifications = library.hasLegacy && !legacyNotificationDismissed ? [{ id: 'legacy-import', key: 'legacy-import', severity: 'warning' as const, icon: 'archive' as const, text: 'Browser-saved PourOver recipes were found.', action: 'import-legacy' as const, persistent: true, createdAt: 0 }] : []
   const reentryStatusVisible = activeBrew && !brewFocusOpen
+  const dockVisible = !brewFocusOpen && !brewSelectionOpen
+  const compactBrewSummary = activeBrew
+    ? deriveActiveBrewSummary({ recipe, schedule: guided.schedule, status: guided.status, elapsed: guided.elapsed, mode: guided.machine.mode, telemetry: device.liveTelemetry, machine: guided.machine })
+    : null
   const headerTitle = tab === 'brew' ? recipe.name : tab === 'beans' ? 'Beans' : tab === 'recipes' ? 'Recipes' : tab === 'device' ? 'Settings' : 'Brew history'
   const headerTitleVariant = tab === 'history' || tab === 'beans' || tab === 'recipes' ? 'library' : 'compact'
 
   return <main className="appliance" data-theme={dark ? 'dark' : 'light'}>
-    <header className="appliance-header"><h1 className={`page-title page-title--${headerTitleVariant} appliance-header__title`}><a href={tab === 'brew' ? '#history' : appHash(tab)}>{headerTitle}</a></h1><div className="appliance-actions"><a aria-current={tab === 'device' ? 'page' : undefined} aria-label="Settings" className={tab === 'device' ? 'settings-tab active' : 'settings-tab'} data-tour="settings" href="#device"><Settings aria-hidden="true" /><span>Settings</span></a>{reentryStatusVisible ? <ActiveBrewStatus action={guided.status === 'paused' ? 'resume' : 'fullscreen'} blocked={guided.status === 'paused' && (guided.deviceBlocked || !canStartDevice)} coffeeBag={coffeeBag} onAction={guided.status === 'paused' ? resumeInFocus : openBrewFocus} recipe={recipe} /> : null}</div></header>
+    <header className="appliance-header" data-compact={headerCompact ? 'true' : 'false'}><ProgressiveBlur className="progressive-blur--header" /><h1 className={`page-title page-title--${headerTitleVariant} appliance-header__title`}><a href={tab === 'brew' ? '#history' : appHash(tab)}>{headerTitle}</a></h1><div className="appliance-actions"><a aria-current={tab === 'device' ? 'page' : undefined} aria-label="Settings" className={tab === 'device' ? 'settings-tab active' : 'settings-tab'} data-tour="settings" href="#device" title="Settings"><Settings aria-hidden="true" /></a></div></header>
     <DeviceStatusBanner availability={device.availability} browserNetwork={device.browserNetwork} reconnectAttempt={device.reconnectAttempt} onReconnect={device.reconnect} suppress={notificationState.active} />
-    <BrewNotificationStack notifications={liveBrewNotifications.notifications} onDismiss={liveBrewNotifications.dismiss} onReconnect={liveBrewNotifications.reconnect} />
-    {library.hasLegacy ? <div className="legacy-banner"><span>Browser-saved PourOver recipes were found.</span><button onClick={() => void library.importLegacy()}>Import to PourFrame</button></div> : null}
+    <BrewNotificationStack notifications={liveBrewNotifications.notifications} persistentNotifications={persistentNotifications} onDismiss={liveBrewNotifications.dismiss} onPersistentDismiss={() => setLegacyNotificationDismissed(true)} onReconnect={liveBrewNotifications.reconnect} onImportLegacy={() => void library.importLegacy()} />
     {library.status !== 'ready' ? <div className={`library-status library-status--${library.status}`} role="status">{library.message}</div> : null}
     <div className="appliance-body">
       {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.liveTelemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} traceBuffer={guided.traceBuffer!} dualTare={dualTare} canStartDevice={canStartDevice} canResumeDevice={canStartDevice} deviceBlocked={guided.deviceBlocked} onStart={openBrewSelection} onPause={guided.pauseResume} onReset={guided.reset} onFinish={guided.finish} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} onOpenFocus={openBrewFocus} /> : null}
@@ -1262,7 +1265,8 @@ function App() {
       {tab === 'history' ? <HistoryWorkspace brews={library.brews} /> : null}
       {tab === 'device' ? <DeviceWorkspace availability={device.availability} canInstall={pwaInstall.canInstall} connection={device.connection} dualTare={dualTare} historyCount={library.brews.length} lastUpdateAt={device.lastUpdateAt} mockMode={device.mockMode} onboardingEnabled={!onboardingBlocked} onClearHistory={library.clearBrews} onInstall={() => void pwaInstall.install()} onOpenOnboarding={openOnboarding} onThemePreferenceChange={setThemePreference} onToggleSound={toggleSound} saveWifi={device.saveWifi} sendCommand={device.sendCommand} sound={sound} telemetry={device.liveTelemetry} themePreference={themePreference} /> : null}
     </div>
-    {preparationDockVisible ? <IdleBrewDock disabled={!canStartDevice} onPrepare={openBrewSelection} tab={tab} /> : null}
+    {dockVisible ? <div className="brew-dock-stack"><ProgressiveBlur className="progressive-blur--dock-backdrop" /><IdleBrewDock disabled={!canStartDevice || activeBrew} onPrepare={openBrewSelection} tab={tab} /></div> : null}
+    {reentryStatusVisible && compactBrewSummary ? <ActiveBrewDock dark={dark} elapsed={guided.elapsed} onEnd={guided.finish} onOpenFocus={openBrewFocus} onPauseResume={guided.pauseResume} recipe={recipe} status={guided.status} step={compactBrewSummary.step} totalWeight={compactBrewSummary.totalWater} /> : null}
     {brewSelectionOpen ? <BrewSelectionSheet coffeeBags={library.coffeeBags} dark={dark} onClose={() => setBrewSelectionOpen(false)} onConfirm={confirmBrewSelection} recipes={library.recipes} selectedCoffeeBagId={coffeeBagId} selectedRecipeId={recipe.id} /> : null}
     {brewFocusOpen && guided.prepStage ? <PreparationFocus dark={dark} fullscreenActive={brewFocusFullscreenActive} stage={guided.prepStage} message={guided.message} recipe={recipe} coffeeBag={coffeeBag} usableUpper={usableScale(device.liveTelemetry?.scales.upper)} usableLower={usableScale(device.liveTelemetry?.scales.lower)} onClose={closePreparationFocus} onPrepare={() => void guided.prepare()} onStart={guided.startPrepared} onStartTimer={guided.startTimerOnly} traceBuffer={guided.traceBuffer!} milestones={focusMilestones} /> : null}
     {brewFocusOpen && !guided.prepStage && (activeBrew || guided.status === 'complete') ? <ActiveBrewSummary dark={dark} elapsed={guided.elapsed} fullscreenActive={brewFocusFullscreenActive} machine={guided.machine} message={guided.message} milestones={focusMilestones} mode={guided.machine.mode} onEnd={guided.finish} onExit={() => closeBrewFocus(false)} onPauseResume={guided.pauseResume} onToggleSound={toggleSound} recipe={recipe} schedule={guided.schedule} sound={sound} status={guided.status} telemetry={device.liveTelemetry} traceBuffer={guided.traceBuffer!} /> : null}

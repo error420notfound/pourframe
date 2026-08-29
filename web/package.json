@@ -9,6 +9,7 @@
     "build:pages": "tsc -b && vite build --config vite.pages.config.ts && node scripts/stamp-pages-service-worker.mjs",
     "lint": "tsc -b --pretty false",
     "test": "vitest run && node --test scripts/font-asset.node-test.mjs scripts/precompress.node-test.mjs scripts/remote-asset-config.node-test.mjs scripts/service-worker.node-test.mjs",
+    "test:e2e": "playwright test --browser=all",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.6",
     "@types/react": "19.2.17",

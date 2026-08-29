@@ -4,7 +4,7 @@ import type { DeviceTelemetry, ScaleTelemetry } from './types'
 import { maxReconnectAttempts, type ConnectionState, type DeviceAvailability } from './useDevice'
 
 export type BrewNotificationSeverity = 'status' | 'warning' | 'error'
-export type BrewNotificationIcon = 'refresh' | 'wifi-off' | 'badge-check' | 'alert' | 'scale' | 'timer-off' | 'pause'
+export type BrewNotificationIcon = 'refresh' | 'wifi-off' | 'badge-check' | 'alert' | 'scale' | 'timer-off' | 'pause' | 'archive'
 
 export interface BrewNotificationCandidate {
   key: string
@@ -12,7 +12,8 @@ export interface BrewNotificationCandidate {
   icon: BrewNotificationIcon
   text: string
   retry?: { attempt: number; maximum: number }
-  action?: 'reconnect'
+  action?: 'reconnect' | 'import-legacy'
+  persistent?: boolean
 }
 
 export interface LiveBrewNotificationState {

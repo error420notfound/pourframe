@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react'
-import { BadgeCheck, PauseCircle, RefreshCw, Scale, TimerOff, TriangleAlert, WifiOff, X } from 'lucide-react'
+import { ArchiveRestore, BadgeCheck, PauseCircle, RefreshCw, Scale, TimerOff, TriangleAlert, WifiOff, X } from 'lucide-react'
 import { insertNotification, liveBrewNotificationCandidates, shouldDismissForSwipe, type BrewNotificationCandidate, type BrewNotificationIcon, type LiveBrewNotificationState } from './brewNotifications'
 
 interface StackNotification extends BrewNotificationCandidate {
@@ -9,8 +9,11 @@ interface StackNotification extends BrewNotificationCandidate {
 
 interface BrewNotificationStackProps {
   notifications: StackNotification[]
+  persistentNotifications?: StackNotification[]
   onDismiss: (id: string) => void
+  onPersistentDismiss?: (id: string) => void
   onReconnect: () => void
+  onImportLegacy?: () => void
 }
 
 const iconMap = {
@@ -21,15 +24,17 @@ const iconMap = {
   scale: Scale,
   'timer-off': TimerOff,
   pause: PauseCircle,
+  archive: ArchiveRestore,
 } satisfies Record<BrewNotificationIcon, typeof RefreshCw>
 
-function BrewNotificationCard({ notification, onDismiss, onReconnect }: { notification: StackNotification; onDismiss: (id: string) => void; onReconnect: () => void }) {
+function BrewNotificationCard({ notification, onDismiss, onPersistentDismiss, onReconnect, onImportLegacy }: { notification: StackNotification; onDismiss: (id: string) => void; onPersistentDismiss: (id: string) => void; onReconnect: () => void; onImportLegacy: () => void }) {
   const [dragOffset, setDragOffset] = useState(0)
   const [dragging, setDragging] = useState(false)
   const dragRef = useRef<{ pointerId: number; startY: number; height: number } | null>(null)
   const dragOffsetRef = useRef(0)
   const Icon = iconMap[notification.icon]
   const style = dragging ? { '--notification-drag-y': `${dragOffset}px` } as CSSProperties : undefined
+  const dismissNotification = () => notification.persistent ? onPersistentDismiss(notification.id) : onDismiss(notification.id)
 
   const onPointerDown = (event: PointerEvent<HTMLElement>) => {
     if ((event.target as Element).closest('button')) return
@@ -57,17 +62,21 @@ function BrewNotificationCard({ notification, onDismiss, onReconnect }: { notifi
     setDragOffset(0)
   }
 
-  return <article className={`brew-notification brew-notification--${notification.severity}${dragging ? ' brew-notification--dragging' : ''}`} onPointerCancel={finishDrag} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishDrag} role={notification.severity === 'error' ? 'alert' : 'status'} style={style}>
+  return <article className={`brew-notification brew-notification--${notification.severity}${notification.persistent ? ' brew-notification--persistent' : ''}${dragging ? ' brew-notification--dragging' : ''}`} onPointerCancel={finishDrag} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishDrag} role={notification.severity === 'error' ? 'alert' : 'status'} style={style}>
     <div className="brew-notification__icon" aria-hidden="true">{notification.retry ? <span>{notification.retry.attempt}/{notification.retry.maximum}</span> : <Icon />}</div>
     <strong>{notification.text}</strong>
-    {notification.action === 'reconnect' ? <button className="brew-notification__action" onClick={onReconnect} type="button">Reconnect</button> : null}
-    <button aria-label="Dismiss notification" className="brew-notification__dismiss" onClick={(event) => { event.stopPropagation(); onDismiss(notification.id) }} type="button"><X aria-hidden="true" /></button>
+    <div className="brew-notification__actions">
+      {notification.action === 'reconnect' ? <button className="brew-notification__action" onClick={onReconnect} type="button">Reconnect</button> : null}
+      {notification.action === 'import-legacy' ? <button className="brew-notification__action" onClick={onImportLegacy} type="button">Import to PourFrame</button> : null}
+      <button aria-label="Dismiss notification" className="brew-notification__dismiss" onClick={(event) => { event.stopPropagation(); dismissNotification() }} type="button"><X aria-hidden="true" /></button>
+    </div>
   </article>
 }
 
-export function BrewNotificationStack({ notifications, onDismiss, onReconnect }: BrewNotificationStackProps) {
-  if (!notifications.length) return null
-  return <aside aria-label="Brew status notifications" className="brew-notification-stack">{notifications.map((notification) => <BrewNotificationCard key={notification.id} notification={notification} onDismiss={onDismiss} onReconnect={onReconnect} />)}</aside>
+export function BrewNotificationStack({ notifications, persistentNotifications = [], onDismiss, onPersistentDismiss = () => undefined, onReconnect, onImportLegacy = () => undefined }: BrewNotificationStackProps) {
+  const visibleNotifications = [...persistentNotifications, ...notifications]
+  if (!visibleNotifications.length) return null
+  return <aside aria-label="PourFrame notifications" className="brew-notification-stack">{visibleNotifications.map((notification) => <BrewNotificationCard key={notification.id} notification={notification} onDismiss={onDismiss} onPersistentDismiss={onPersistentDismiss} onReconnect={onReconnect} onImportLegacy={onImportLegacy} />)}</aside>
 }
 
 export function useLiveBrewNotifications(state: LiveBrewNotificationState, fullscreenActive: boolean, onReconnect: () => void) {

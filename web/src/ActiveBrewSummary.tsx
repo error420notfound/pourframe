@@ -6,6 +6,7 @@ import { formatRecipeWeight, formatTime } from './brew'
 import { liveScaleTelemetry, type BrewMachineState } from './brewMachine'
 import type { BrewMode, BrewRecipe, BrewStatus, BrewStep } from './brewTypes'
 import { BrewGraph, type BrewMilestone } from './BrewGraph'
+import { EndBrewConfirmation } from './EndBrewConfirmation'
 import type { BrewTraceBuffer } from './trace'
 import type { DeviceTelemetry } from './types'
 
@@ -59,8 +60,6 @@ export function ActiveBrewSummary({
   const primaryActionRef = useRef<HTMLButtonElement | null>(null)
   const exitButtonRef = useRef<HTMLButtonElement | null>(null)
   const endButtonRef = useRef<HTMLButtonElement | null>(null)
-  const confirmRef = useRef<HTMLElement | null>(null)
-  const cancelEndRef = useRef<HTMLButtonElement | null>(null)
   const fullscreenWasActiveRef = useRef(Boolean(document.fullscreenElement))
   const confirmingEndRef = useRef(false)
   const [confirmingEnd, setConfirmingEnd] = useState(false)
@@ -109,7 +108,7 @@ export function ActiveBrewSummary({
         return
       }
       if (event.key !== 'Tab') return
-      const scope = confirmingEndRef.current ? confirmRef.current : overlayRef.current
+      const scope = overlayRef.current
       if (!scope) return
       const focusable = Array.from(scope.querySelectorAll<HTMLElement>(focusableSelector))
         .filter((element) => element.getClientRects().length > 0)
@@ -147,7 +146,6 @@ export function ActiveBrewSummary({
 
   const requestEnd = () => {
     setConfirmingEnd(true)
-    requestAnimationFrame(() => cancelEndRef.current?.focus())
   }
 
   const cancelEnd = () => {
@@ -262,19 +260,7 @@ export function ActiveBrewSummary({
         </footer>
       </div>
 
-      {confirmingEnd ? <div className="active-brew-summary__confirm-backdrop">
-        <section aria-labelledby="end-brew-title" aria-modal="true" className="active-brew-summary__confirm" ref={confirmRef} role="alertdialog">
-          <span>End active brew</span>
-          <h2 className="modal-title modal-title--confirmation" id="end-brew-title">Save this brew now?</h2>
-          <p>The current timer, weights, and trace will be saved as an early completion.</p>
-          <div>
-            <button className="active-brew-summary__confirm-cancel" onClick={cancelEnd} ref={cancelEndRef} type="button">Keep brewing</button>
-            <button className="active-brew-summary__confirm-end" disabled={ending} onClick={() => void confirmEnd()} type="button">
-              {ending ? 'Saving…' : 'End and save'}
-            </button>
-          </div>
-        </section>
-      </div> : null}
+      {confirmingEnd ? <EndBrewConfirmation dark={dark} ending={ending} onCancel={cancelEnd} onConfirm={() => void confirmEnd()} /> : null}
     </div>,
     document.body,
   )
