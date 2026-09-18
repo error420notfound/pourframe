@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apple Platform UI Design"
+  short_description: "Design Apple-platform interfaces using HIG"
+  default_prompt: "Use $apple-platform-ui-design to design or critique this interface for the specified Apple platform."

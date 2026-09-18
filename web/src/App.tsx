@@ -1039,10 +1039,10 @@ function HistoryWorkspace({ brews }: { brews: BrewRecord[] }) {
   return <section className="history-workspace"><PageHeader className="history-workspace__header" eyebrow="Shared on PourFrame · latest five" title="Brew history" variant="compact" />{brews.length ? <div className="history-list">{brews.map((brew) => <HistoryBrewItem brew={brew} key={brew.id} />)}</div> : <EmptyState description="Choose a recipe and coffee bag below, then prepare your first guided brew. Its result will be saved here." icon={<History aria-hidden="true" />} title="Take PourFrame for its first brew" variant="full" />}</section>
 }
 
-const progressiveBlurLayers = Array.from({ length: 6 }, (_, index) => index)
+const progressiveBlurLayers = (count: number) => Array.from({ length: count }, (_, index) => index)
 
-function ProgressiveBlur({ className = '' }: { className?: string }) {
-  return <span aria-hidden="true" className={`progressive-blur${className ? ` ${className}` : ''}`}>{progressiveBlurLayers.map((layer) => <span key={layer} />)}</span>
+function ProgressiveBlur({ className = '', layers = 6 }: { className?: string; layers?: number }) {
+  return <span aria-hidden="true" className={`progressive-blur${className ? ` ${className}` : ''}`}>{progressiveBlurLayers(layers).map((layer) => <span key={layer} />)}</span>
 }
 
 export function IdleBrewDock({ tab, disabled, onPrepare }: { tab: AppTab; disabled: boolean; onPrepare: () => void }) {
@@ -1254,7 +1254,7 @@ function App() {
   const headerTitleVariant = tab === 'history' || tab === 'beans' || tab === 'recipes' ? 'library' : 'compact'
 
   return <main className="appliance" data-theme={dark ? 'dark' : 'light'}>
-    <header className="appliance-header" data-compact={headerCompact ? 'true' : 'false'}><ProgressiveBlur className="progressive-blur--header" /><h1 className={`page-title page-title--${headerTitleVariant} appliance-header__title`}><a href={tab === 'brew' ? '#history' : appHash(tab)}>{headerTitle}</a></h1><div className="appliance-actions"><a aria-current={tab === 'device' ? 'page' : undefined} aria-label="Settings" className={tab === 'device' ? 'settings-tab active' : 'settings-tab'} data-tour="settings" href="#device" title="Settings"><Settings aria-hidden="true" /></a></div></header>
+    <header className="appliance-header" data-compact={headerCompact ? 'true' : 'false'}><ProgressiveBlur className="progressive-blur--header" layers={10} /><h1 className={`page-title page-title--${headerTitleVariant} appliance-header__title`}><a href={tab === 'brew' ? '#history' : appHash(tab)}>{headerTitle}</a></h1><div className="appliance-actions"><a aria-current={tab === 'device' ? 'page' : undefined} aria-label="Settings" className={tab === 'device' ? 'settings-tab active' : 'settings-tab'} data-tour="settings" href="#device" title="Settings"><Settings aria-hidden="true" /></a></div></header>
     <DeviceStatusBanner availability={device.availability} browserNetwork={device.browserNetwork} reconnectAttempt={device.reconnectAttempt} onReconnect={device.reconnect} suppress={notificationState.active} />
     <BrewNotificationStack notifications={liveBrewNotifications.notifications} persistentNotifications={persistentNotifications} onDismiss={liveBrewNotifications.dismiss} onPersistentDismiss={() => setLegacyNotificationDismissed(true)} onReconnect={liveBrewNotifications.reconnect} onImportLegacy={() => void library.importLegacy()} />
     {library.status !== 'ready' ? <div className={`library-status library-status--${library.status}`} role="status">{library.message}</div> : null}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apple Adaptive Layouts"
+  short_description: "Design adaptive Apple-platform layouts"
+  default_prompt: "Use $apple-adaptive-layouts to adapt this interface across the specified Apple devices and window states."

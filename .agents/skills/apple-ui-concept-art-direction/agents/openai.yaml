@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apple UI Concept Art Direction"
+  short_description: "Direct credible Apple-platform UI concepts"
+  default_prompt: "Use $apple-ui-concept-art-direction to develop and visualize a credible Apple-platform UI concept from this brief."

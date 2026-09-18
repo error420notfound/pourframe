@@ -1597,7 +1597,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 @media (max-width: 640px) {
-  :root { --appliance-header-height: 115px; }.appliance-header { --appliance-header-height: 115px; min-height: var(--appliance-header-height); height: var(--appliance-header-height); padding: 0 16px; gap: 10px; background: var(--app-bg); backdrop-filter: none; }.appliance-connection { display: none; }.appliance-header__title { font-size: 2rem; }.appliance-actions > button { width: 38px; height: 38px; }.appliance-actions > .install-app { width: 38px; padding: 10px; }.install-app span { display: none; }
+  :root { --appliance-header-height: 115px; }.appliance-header { --appliance-header-height: 115px; min-height: var(--appliance-header-height); height: var(--appliance-header-height); padding: 0 16px; gap: 10px; }.appliance-connection { display: none; }.appliance-header__title { font-size: 2rem; }.appliance-actions > button { width: 38px; height: 38px; }.appliance-actions > .install-app { width: 38px; padding: 10px; }.install-app span { display: none; }
   .device-status-banner { top: 68px; padding: 10px 16px; align-items: flex-start; }.device-status-banner span { font-size: .68rem; }.device-status-banner__action { min-height: 34px; padding: 0 9px; }
   .appliance-header nav { padding: 5px; gap: 2px; }.appliance-header nav a { min-width: 0; padding: 0 6px; flex-direction: column; gap: 2px; font-size: .62rem; }.appliance-header nav a svg { width: 17px; height: 17px; }
   .appliance-body { padding: 18px 14px 96px; }.brew-layout { gap: 14px; }.brew-hero, .brew-readings, .brew-guide { border-radius: calc(18px * var(--pf-radius-scale)); }
@@ -1974,9 +1974,7 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
 /* Shared navigation and active brew re-entry controls. These intentionally use
    explicit rounded geometry rather than the optional global squircle style. */
 .appliance-header {
-  --progressive-blur-direction: to top;
-  --progressive-blur-tint: color-mix(in srgb, var(--app-bg) 18%, transparent);
-  isolation: isolate;
+  --progressive-blur-direction: to bottom;
   border-bottom: 0;
   background: transparent;
 }
@@ -2001,13 +1999,26 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
   inset: 0;
   background: var(--progressive-blur-tint);
 }
+.progressive-blur--header {
+  --progressive-blur-direction: to bottom;
+}
+.progressive-blur--header::after {
+  display: none;
+}
 .progressive-blur > span {
   position: absolute;
   inset: 0;
+  /* A virtually transparent paint layer makes Safari/WebKit reliably compose
+     the backdrop without introducing a visible tint. */
+  background: rgb(0 0 0 / .001);
   backdrop-filter: blur(var(--progressive-blur-strength));
   -webkit-backdrop-filter: blur(var(--progressive-blur-strength));
   mask-image: linear-gradient(var(--progressive-blur-direction), transparent var(--progressive-blur-start), #000 var(--progressive-blur-end));
   -webkit-mask-image: linear-gradient(var(--progressive-blur-direction), transparent var(--progressive-blur-start), #000 var(--progressive-blur-end));
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-size: 100% 100%;
+  -webkit-mask-size: 100% 100%;
 }
 .progressive-blur > span:nth-child(1) { --progressive-blur-strength: .5px; --progressive-blur-start: 0%; --progressive-blur-end: 33%; z-index: 1; }
 .progressive-blur > span:nth-child(2) { --progressive-blur-strength: 1px; --progressive-blur-start: 13%; --progressive-blur-end: 46%; z-index: 2; }
@@ -2015,6 +2026,20 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
 .progressive-blur > span:nth-child(4) { --progressive-blur-strength: 4px; --progressive-blur-start: 40%; --progressive-blur-end: 73%; z-index: 4; }
 .progressive-blur > span:nth-child(5) { --progressive-blur-strength: 8px; --progressive-blur-start: 54%; --progressive-blur-end: 87%; z-index: 5; }
 .progressive-blur > span:nth-child(6) { --progressive-blur-strength: 16px; --progressive-blur-start: 67%; --progressive-blur-end: 100%; z-index: 6; }
+.progressive-blur--header > span { background: rgba(0, 0, 0, .16); }
+.progressive-blur--header > span:nth-child(1) { --progressive-blur-strength: 0px; --progressive-blur-start: 0%; --progressive-blur-end: 20%; z-index: 1; }
+.progressive-blur--header > span:nth-child(2) { --progressive-blur-strength: 1px; --progressive-blur-start: 10%; --progressive-blur-end: 30%; z-index: 2; }
+.progressive-blur--header > span:nth-child(3) { --progressive-blur-strength: 2px; --progressive-blur-start: 20%; --progressive-blur-end: 40%; z-index: 3; }
+.progressive-blur--header > span:nth-child(4) { --progressive-blur-strength: 3px; --progressive-blur-start: 30%; --progressive-blur-end: 50%; z-index: 4; }
+.progressive-blur--header > span:nth-child(5) { --progressive-blur-strength: 5px; --progressive-blur-start: 40%; --progressive-blur-end: 60%; z-index: 5; }
+.progressive-blur--header > span:nth-child(6) { --progressive-blur-strength: 7px; --progressive-blur-start: 50%; --progressive-blur-end: 70%; z-index: 6; }
+.progressive-blur--header > span:nth-child(7) { --progressive-blur-strength: 9px; --progressive-blur-start: 60%; --progressive-blur-end: 80%; z-index: 7; }
+.progressive-blur--header > span:nth-child(8) { --progressive-blur-strength: 11px; --progressive-blur-start: 70%; --progressive-blur-end: 90%; z-index: 8; }
+.progressive-blur--header > span:nth-child(9) { --progressive-blur-strength: 14px; --progressive-blur-start: 80%; --progressive-blur-end: 100%; z-index: 9; }
+.progressive-blur--header > span:nth-child(10) { --progressive-blur-strength: 17px; --progressive-blur-start: 90%; --progressive-blur-end: 100%; z-index: 10; }
+/* Dark copy uses plus-lighter, but blur layers must composite the backdrop
+   normally or their filtered pixels disappear into the dark surface. */
+.appliance[data-theme='dark'] .progressive-blur > span { mix-blend-mode: normal; }
 .appliance-header > :not(.progressive-blur) {
   position: relative;
   z-index: 8;
@@ -2046,7 +2071,6 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
   max-width: calc(100vw - 36px);
   margin: 0;
   transform: translateX(-50%);
-  isolation: isolate;
 }
 .progressive-blur--dock-backdrop { border-radius: var(--chrome-pill-radius); }
 .brew-dock-stack > .brew-dock {
