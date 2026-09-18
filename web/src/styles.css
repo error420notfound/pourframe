@@ -2001,7 +2001,6 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
 /* Shared navigation and active brew re-entry controls. These intentionally use
    explicit rounded geometry rather than the optional global squircle style. */
 .appliance-header {
-  --progressive-blur-direction: to bottom;
   border-bottom: 0;
   background: transparent;
 }
@@ -2011,65 +2010,6 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
 .appliance-header[data-compact='true'] .appliance-header__title {
   font-size: 1.4rem;
   letter-spacing: -.025rem;
-}
-.progressive-blur {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-.progressive-blur::after {
-  content: '';
-  position: absolute;
-  z-index: 7;
-  inset: 0;
-  background: var(--progressive-blur-tint);
-}
-.progressive-blur--header {
-  --progressive-blur-direction: to bottom;
-}
-.progressive-blur--header::after {
-  display: none;
-}
-.progressive-blur > span {
-  position: absolute;
-  inset: 0;
-  /* A virtually transparent paint layer makes Safari/WebKit reliably compose
-     the backdrop without introducing a visible tint. */
-  background: rgb(0 0 0 / .001);
-  backdrop-filter: blur(var(--progressive-blur-strength));
-  -webkit-backdrop-filter: blur(var(--progressive-blur-strength));
-  mask-image: linear-gradient(var(--progressive-blur-direction), transparent var(--progressive-blur-start), #000 var(--progressive-blur-end));
-  -webkit-mask-image: linear-gradient(var(--progressive-blur-direction), transparent var(--progressive-blur-start), #000 var(--progressive-blur-end));
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-size: 100% 100%;
-  -webkit-mask-size: 100% 100%;
-}
-.progressive-blur > span:nth-child(1) { --progressive-blur-strength: .5px; --progressive-blur-start: 0%; --progressive-blur-end: 33%; z-index: 1; }
-.progressive-blur > span:nth-child(2) { --progressive-blur-strength: 1px; --progressive-blur-start: 13%; --progressive-blur-end: 46%; z-index: 2; }
-.progressive-blur > span:nth-child(3) { --progressive-blur-strength: 2px; --progressive-blur-start: 27%; --progressive-blur-end: 60%; z-index: 3; }
-.progressive-blur > span:nth-child(4) { --progressive-blur-strength: 4px; --progressive-blur-start: 40%; --progressive-blur-end: 73%; z-index: 4; }
-.progressive-blur > span:nth-child(5) { --progressive-blur-strength: 8px; --progressive-blur-start: 54%; --progressive-blur-end: 87%; z-index: 5; }
-.progressive-blur > span:nth-child(6) { --progressive-blur-strength: 16px; --progressive-blur-start: 67%; --progressive-blur-end: 100%; z-index: 6; }
-.progressive-blur--header > span { background: rgba(0, 0, 0, .16); }
-.progressive-blur--header > span:nth-child(1) { --progressive-blur-strength: 0px; --progressive-blur-start: 0%; --progressive-blur-end: 20%; z-index: 1; }
-.progressive-blur--header > span:nth-child(2) { --progressive-blur-strength: 1px; --progressive-blur-start: 10%; --progressive-blur-end: 30%; z-index: 2; }
-.progressive-blur--header > span:nth-child(3) { --progressive-blur-strength: 2px; --progressive-blur-start: 20%; --progressive-blur-end: 40%; z-index: 3; }
-.progressive-blur--header > span:nth-child(4) { --progressive-blur-strength: 3px; --progressive-blur-start: 30%; --progressive-blur-end: 50%; z-index: 4; }
-.progressive-blur--header > span:nth-child(5) { --progressive-blur-strength: 5px; --progressive-blur-start: 40%; --progressive-blur-end: 60%; z-index: 5; }
-.progressive-blur--header > span:nth-child(6) { --progressive-blur-strength: 7px; --progressive-blur-start: 50%; --progressive-blur-end: 70%; z-index: 6; }
-.progressive-blur--header > span:nth-child(7) { --progressive-blur-strength: 9px; --progressive-blur-start: 60%; --progressive-blur-end: 80%; z-index: 7; }
-.progressive-blur--header > span:nth-child(8) { --progressive-blur-strength: 11px; --progressive-blur-start: 70%; --progressive-blur-end: 90%; z-index: 8; }
-.progressive-blur--header > span:nth-child(9) { --progressive-blur-strength: 14px; --progressive-blur-start: 80%; --progressive-blur-end: 100%; z-index: 9; }
-.progressive-blur--header > span:nth-child(10) { --progressive-blur-strength: 17px; --progressive-blur-start: 90%; --progressive-blur-end: 100%; z-index: 10; }
-/* Dark copy uses plus-lighter, but blur layers must composite the backdrop
-   normally or their filtered pixels disappear into the dark surface. */
-.appliance[data-theme='dark'] .progressive-blur > span { mix-blend-mode: normal; }
-.appliance-header > :not(.progressive-blur) {
-  position: relative;
-  z-index: 8;
 }
 .settings-tab {
   width: 40px;
@@ -2086,8 +2026,6 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
   --chrome-pill-radius: 24px;
   --chrome-pill-inset: 4px;
   --chrome-inner-radius: 20px;
-  --progressive-blur-direction: to bottom;
-  --progressive-blur-tint: color-mix(in srgb, var(--app-surface) 18%, transparent);
   position: fixed;
   z-index: 35;
   top: calc(var(--appliance-header-height) + 12px);
@@ -2099,7 +2037,6 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
   margin: 0;
   transform: translateX(-50%);
 }
-.progressive-blur--dock-backdrop { border-radius: var(--chrome-pill-radius); }
 .brew-dock-stack > .brew-dock {
   position: relative;
   z-index: 1;
@@ -2200,12 +2137,6 @@ html[data-splash-theme='dark'] .pourframe-tour .driver-popover-arrow-side-bottom
   .appliance:has(.active-brew-dock) .appliance-body { padding-top: clamp(24px, 4vw, 58px); padding-bottom: 226px; }
 }
 
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .progressive-blur > span { display: none; }
-}
-@supports not ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
-  .progressive-blur > span { display: none; }
-}
 @media (prefers-reduced-motion: reduce) {
   .appliance-header__title { transition: none; }
 }
