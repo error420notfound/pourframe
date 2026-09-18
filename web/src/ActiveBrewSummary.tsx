@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowsPointingInIcon as Minimize2, PauseIcon as Pause, PlayIcon as Play, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StopIcon as Square } from '@heroicons/react/24/solid'
+import { ArrowsPointingInIcon as Minimize2, ArrowsPointingOutIcon as Maximize2, PauseIcon as Pause, PlayIcon as Play, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StopIcon as Square, XMarkIcon as X } from '@heroicons/react/24/solid'
 import { deriveActiveBrewSummary } from './brewSummaryModel'
 import { formatRecipeWeight, formatTime } from './brew'
 import { liveScaleTelemetry, type BrewMachineState } from './brewMachine'
@@ -27,6 +27,8 @@ export interface ActiveBrewSummaryProps {
   onPauseResume: () => void
   onEnd: () => Promise<void>
   onToggleSound: () => void
+  onToggleFullscreen: () => void
+  fullscreenMessage: string
   onExit: () => void
 }
 
@@ -54,13 +56,14 @@ export function ActiveBrewSummary({
   onPauseResume,
   onEnd,
   onToggleSound,
+  onToggleFullscreen,
+  fullscreenMessage,
   onExit,
 }: ActiveBrewSummaryProps) {
   const overlayRef = useRef<HTMLDivElement | null>(null)
   const primaryActionRef = useRef<HTMLButtonElement | null>(null)
   const exitButtonRef = useRef<HTMLButtonElement | null>(null)
   const endButtonRef = useRef<HTMLButtonElement | null>(null)
-  const fullscreenWasActiveRef = useRef(Boolean(document.fullscreenElement))
   const confirmingEndRef = useRef(false)
   const [confirmingEnd, setConfirmingEnd] = useState(false)
   const [ending, setEnding] = useState(false)
@@ -92,10 +95,6 @@ export function ActiveBrewSummary({
     appliance?.setAttribute('aria-hidden', 'true')
     primaryActionRef.current?.focus()
 
-    const onFullscreenChange = () => {
-      if (document.fullscreenElement) fullscreenWasActiveRef.current = true
-      else if (fullscreenWasActiveRef.current) onExit()
-    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -124,7 +123,6 @@ export function ActiveBrewSummary({
       }
     }
 
-    document.addEventListener('fullscreenchange', onFullscreenChange)
     window.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
@@ -135,7 +133,6 @@ export function ActiveBrewSummary({
         if (previousAriaHidden == null) appliance.removeAttribute('aria-hidden')
         else appliance.setAttribute('aria-hidden', previousAriaHidden)
       }
-      document.removeEventListener('fullscreenchange', onFullscreenChange)
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [exit, onExit])
@@ -209,11 +206,15 @@ export function ActiveBrewSummary({
             >
               {sound ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
             </button>
-            <button aria-label={fullscreenActive ? 'Exit full-screen brew summary' : 'Exit brew focus view'} className="active-brew-summary__utility" onClick={exit} ref={exitButtonRef} type="button">
-              <Minimize2 aria-hidden="true" />
+            <button aria-label={fullscreenActive ? 'Exit full-screen brew summary' : 'Enter full-screen brew summary'} className="active-brew-summary__utility" onClick={onToggleFullscreen} type="button">
+              {fullscreenActive ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+            </button>
+            <button aria-label="Exit brew focus view" className="active-brew-summary__utility" onClick={exit} ref={exitButtonRef} type="button">
+              <X aria-hidden="true" />
             </button>
           </div>
         </header>
+        {fullscreenMessage ? <p className="active-brew-summary__fullscreen-status" role="status">{fullscreenMessage}</p> : null}
 
         <div className="active-brew-summary__metrics" id="active-brew-summary-description">
           <section className="active-brew-summary__metric active-brew-summary__metric--timer" aria-label="Elapsed brew time">

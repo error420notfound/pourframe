@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { IdleBrewDock, SettingsControls } from './App'
-import { Button, EmptyState, LibraryItemCard, LibraryPanel, Modal, PageHeader, SectionHeader } from './ui'
+import { Button, EmptyState, LibraryItemCard, LibraryPanel, Modal, ModalSheet, PageHeader, SectionHeader } from './ui'
 
 describe('shared UI primitives', () => {
   it('keeps page and section titles semantic', () => {
@@ -34,6 +34,16 @@ describe('shared UI primitives', () => {
     expect(markup).toContain(`id="${labelledBy}"`)
     expect(markup).toContain('aria-label="Save recipe"')
     expect(markup).not.toContain('aria-modal="true"')
+  })
+
+  it('renders editor sheets as labelled modal dialogs with visible actions', () => {
+    const markup = renderToStaticMarkup(<ModalSheet actions={<button type="button">Save coffee bag</button>} dirty onClose={() => undefined} onSave={() => true} title="Edit coffee bag"><label><span>Name</span><input data-modal-initial-focus /></label></ModalSheet>)
+
+    expect(markup).toContain('role="dialog"')
+    expect(markup).toContain('aria-modal="true"')
+    expect(markup).toContain('Cancel')
+    expect(markup).toContain('Save coffee bag')
+    expect(markup).toContain('data-modal-initial-focus')
   })
 
   it('maps button surfaces and variants without dropping native attributes', () => {

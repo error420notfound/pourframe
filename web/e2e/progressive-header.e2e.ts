@@ -76,5 +76,5 @@ test('renders the ten-layer dark header material while keeping the idle navigati
   await prepare.focus()
   await expect(prepare).toBeFocused()
   await prepare.press('Enter')
-  await expect(page.getByRole('region', { name: 'Choose your brew' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Choose your brew' })).toBeVisible()
 })

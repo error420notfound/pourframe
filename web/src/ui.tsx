@@ -5,6 +5,7 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from 'react'
@@ -133,6 +134,137 @@ export function Modal({ title, children, onClose, variant = 'default', closeLabe
   )
 }
 
+interface ModalSheetProps {
+  title: string
+  children: ReactNode
+  actions?: ReactNode
+  onClose: () => void
+  dirty?: boolean
+  onSave?: () => Promise<boolean | void> | boolean | void
+  triggerRef?: { current: HTMLElement | null }
+  className?: string
+}
+
+/** A blocking, draft-safe sheet for short editing and choice tasks. */
+export function ModalSheet({ title, children, actions, onClose, dirty = false, onSave, triggerRef, className }: ModalSheetProps) {
+  const titleId = useId()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const confirmRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  const requestCloseRef = useRef<() => void>(() => undefined)
+  const [confirming, setConfirming] = useState(false)
+  const [saving, setSaving] = useState(false)
+  onCloseRef.current = onClose
+
+  const requestClose = () => {
+    if (dirty) setConfirming(true)
+    else onCloseRef.current()
+  }
+  requestCloseRef.current = requestClose
+
+  useEffect(() => {
+    if (confirming) requestAnimationFrame(() => confirmRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus())
+  }, [confirming])
+
+  useEffect(() => {
+    previousFocusRef.current = triggerRef?.current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    const previousOverflow = document.body.style.overflow
+    const appliance = document.querySelector<HTMLElement>('.appliance')
+    const previousInert = appliance?.hasAttribute('inert') ?? false
+    const previousAriaHidden = appliance?.getAttribute('aria-hidden')
+    document.body.style.overflow = 'hidden'
+    const syncViewport = () => {
+      containerRef.current?.style.setProperty('--pf-visual-vh', `${window.visualViewport?.height ?? window.innerHeight}px`)
+    }
+    syncViewport()
+    window.visualViewport?.addEventListener('resize', syncViewport)
+    appliance?.setAttribute('inert', '')
+    appliance?.setAttribute('aria-hidden', 'true')
+    const focusInitial = () => {
+      const scope = containerRef.current
+      const first = scope?.querySelector<HTMLElement>('[data-modal-initial-focus]')
+        ?? scope?.querySelector<HTMLElement>('input:not([disabled]), select:not([disabled]), textarea:not([disabled])')
+        ?? scope?.querySelector<HTMLElement>('button:not([disabled])')
+      ;(first ?? closeRef.current)?.focus()
+    }
+    requestAnimationFrame(focusInitial)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        requestCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const scope = confirmRef.current ?? containerRef.current
+      if (!scope) return
+      const focusable = Array.from(scope.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+        .filter((element) => element.getClientRects().length > 0)
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.visualViewport?.removeEventListener('resize', syncViewport)
+      if (appliance) {
+        if (!previousInert) appliance.removeAttribute('inert')
+        if (previousAriaHidden == null) appliance.removeAttribute('aria-hidden')
+        else appliance.setAttribute('aria-hidden', previousAriaHidden)
+      }
+      document.removeEventListener('keydown', onKeyDown)
+      if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus()
+    }
+  }, [])
+
+  const confirmSave = async () => {
+    if (!onSave || saving) return
+    setSaving(true)
+    try {
+      const result = await onSave()
+      if (result !== false) setConfirming(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const sheet = (
+    <div className={classNames('modal-sheet-container', className)} onMouseDown={(event) => event.target === event.currentTarget && requestClose()} ref={containerRef}>
+      <section aria-hidden={confirming || undefined} aria-labelledby={titleId} aria-modal="true" className="modal-sheet" role="dialog">
+        <div aria-hidden="true" className="modal-sheet__handle" />
+        <header className="modal-sheet__header">
+          <button className="modal-sheet__cancel" onClick={requestClose} ref={closeRef} type="button">Cancel</button>
+          <h2 className="modal-title modal-sheet__title" id={titleId}>{title}</h2>
+          <div className="modal-sheet__actions">{actions}</div>
+        </header>
+        <div className="modal-sheet__body">{children}</div>
+      </section>
+      {confirming ? <div aria-labelledby={`${titleId}-confirm-title`} aria-modal="true" className="modal-sheet-confirm-backdrop" ref={confirmRef} role="alertdialog">
+        <section className="modal-sheet-confirm">
+          <h2 id={`${titleId}-confirm-title`}>Unsaved changes</h2>
+          <p>Save your changes before closing?</p>
+          <div className="modal-sheet-confirm__actions">
+            <button onClick={() => setConfirming(false)} type="button">Continue editing</button>
+            <button className="modal-sheet-confirm__discard" onClick={() => { setConfirming(false); onCloseRef.current() }} type="button">Discard</button>
+            {onSave ? <button className="modal-sheet-confirm__save" disabled={saving} onClick={() => void confirmSave()} type="button">{saving ? 'Saving…' : 'Save'}</button> : null}
+          </div>
+        </section>
+      </div> : null}
+    </div>
+  )
+
+  return typeof document === 'undefined' ? sheet : createPortal(sheet, document.body)
+}
+
 interface LibraryPanelProps {
   title: string
   children: ReactNode
@@ -140,7 +272,7 @@ interface LibraryPanelProps {
   onEscape: () => void
 }
 
-/** A persistent, non-modal panel for library detail and editing flows. */
+/** A persistent, non-modal panel for read-only library detail views. */
 export function LibraryPanel({ title, children, actions, onEscape }: LibraryPanelProps) {
   const titleId = useId()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -204,10 +336,11 @@ interface EmptyStateProps {
   icon: ReactNode
   title: string
   description: string
+  action?: ReactNode
   variant?: 'compact' | 'full'
 }
 
-export function EmptyState({ icon, title, description, variant = 'compact' }: EmptyStateProps) {
+export function EmptyState({ icon, title, description, action, variant = 'compact' }: EmptyStateProps) {
   return (
     <div className={classNames('empty-state', `empty-state--${variant}`)}>
       {icon}
@@ -217,6 +350,7 @@ export function EmptyState({ icon, title, description, variant = 'compact' }: Em
       {variant === 'full'
         ? <p className="empty-state__description">{description}</p>
         : <span className="empty-state__description">{description}</span>}
+      {action}
     </div>
   )
 }
