@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrewRecipe, BrewRecord, CoffeeBag, Collection } from './brewTypes'
 import { defaultRecipes } from './defaultRecipes'
 import { defaultCoffeeBags } from './defaultCoffeeBags'
-import { buildSchedule, migrateRecipe, validateRecipe } from './brew'
+import { buildSchedule, migrateRecipe, needsRecipeTimestampMigration, normalizeRecipe, validateRecipe } from './brew'
 import { normalizeCoffeeBag, validateCoffeeBag } from './coffeeBag'
 import { decodeTrace, encodeTrace, type BrewTraceSample } from './trace'
 import { applyMutationProjection, commitCollectionAndDeleteOutbox, deleteOutbox, mutationDisposition, putCachedCollection, putOutbox, putTraceCache, readCachedCollections, readOutbox, readTraceCache, type BrewOutboxEntry, type MutationOutboxEntry, type MutableCollection } from './libraryStorage'
@@ -183,7 +183,7 @@ async function readCoffeeBags() {
 }
 
 async function postRecipe(recipe: BrewRecipe, baseRevision: number) {
-  recipe = migrateRecipe(recipe)
+  recipe = normalizeRecipe(recipe)
   if (mockMode) {
     const found = mockRecipes.items.findIndex((item) => item.id === recipe.id)
     const items = [...mockRecipes.items]
@@ -360,6 +360,7 @@ export function useLibrary() {
       brewCollection = { ...brewCollection, items: retainNewestBrews(brewCollection.items) }
       coffeeBagCollection = { ...coffeeBagCollection, items: coffeeBagCollection.items.map(normalizeCoffeeBag) }
       if (recipeCollection.items.length === 0) for (const recipe of defaultRecipes) recipeCollection = await postRecipe(recipe, recipeCollection.revision)
+      else for (const recipe of recipeCollection.items.filter(needsRecipeTimestampMigration)) recipeCollection = await postRecipe(recipe, recipeCollection.revision)
       if (coffeeBagCollection.items.length === 0) for (const coffeeBag of defaultCoffeeBags) coffeeBagCollection = await postCoffeeBag(coffeeBag, coffeeBagCollection.revision)
       const pending = await readOutbox()
       const recipeMutations = pending.filter((item): item is MutationOutboxEntry => item.kind === 'mutation' && item.collection === 'recipes')
@@ -439,7 +440,7 @@ export function useLibrary() {
   }, [syncMutation])
 
   const saveRecipe = useCallback(async (recipe: BrewRecipe) => {
-    recipe = migrateRecipe(recipe)
+    recipe = normalizeRecipe(recipe)
     const baseRecord = recipesRef.current.find((item) => item.id === recipe.id)
     const projected = [recipe, ...recipesRef.current.filter((item) => item.id !== recipe.id)].slice(0, 24)
     publishRecipes({ v: 1, revision: recipeRevision.current, items: projected })

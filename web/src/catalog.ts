@@ -482,7 +482,7 @@ export function catalogRecipeId(remoteId: string): string {
 
 export function catalogRecipeToBrewRecipe(recipe: CatalogRecipe): BrewRecipe {
   const { schemaVersion: _schemaVersion, id, ...catalogValues } = recipe
-  const local = normalizeRecipe(migrateRecipe({ ...catalogValues, id: catalogRecipeId(id), starred: false }))
+  const local = normalizeRecipe(migrateRecipe({ ...catalogValues, id: catalogRecipeId(id), starred: false, createdAt: '1970-01-01T00:00:00.000Z', updatedAt: '1970-01-01T00:00:00.000Z' }))
   const validation = validateRecipe(local)
   if (!validation.valid) throw new CatalogError(Object.values(validation.errors)[0] ?? 'This catalog recipe cannot be saved.')
   return local

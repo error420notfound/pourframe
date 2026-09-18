@@ -31,6 +31,10 @@ export interface BrewRecipe {
   starred: boolean
   /** How this recipe is served. Legacy records migrate to hot. */
   serveStyle: RecipeServeStyle
+  /** First-seen timestamp for library ordering. Legacy records are upgraded on sync. */
+  createdAt: string
+  /** Last saved timestamp for library ordering. */
+  updatedAt: string
 }
 
 export interface CoffeeBag {

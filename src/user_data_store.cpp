@@ -194,7 +194,8 @@ bool UserDataStore::validRecipe(JsonObjectConst recipe, String &error) const {
     return false;
   }
   if (!boundedString(recipe["grind"], 1, 32) || !boundedString(recipe["agitation"], 0, 120) ||
-      !boundedString(recipe["notes"], 0, 500) || !recipe["equipment"].is<JsonArrayConst>()) {
+      !boundedString(recipe["notes"], 0, 500) || !boundedString(recipe["createdAt"], 20, 40) ||
+      !boundedString(recipe["updatedAt"], 20, 40) || !recipe["equipment"].is<JsonArrayConst>()) {
     error = "invalid_recipe_details";
     return false;
   }

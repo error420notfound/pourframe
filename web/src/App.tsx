@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
-import { ArrowDownTrayIcon as Download, ArrowPathIcon as RefreshCw, ArrowUturnLeftIcon as RotateCcw, ArrowUpTrayIcon as FileUp, ArrowsPointingInIcon as Minimize2, ArrowsPointingOutIcon as Maximize2, BeakerIcon as Coffee, BookOpenIcon as BookOpen, BookmarkSquareIcon as Save, CheckCircleIcon as CheckCircle2, ChevronRightIcon as ChevronRight, ClockIcon as Clock3, ClockIcon as History, Cog6ToothIcon as Settings, MoonIcon as Moon, PauseIcon as Pause, PencilIcon as Pencil, PlayIcon as Play, QuestionMarkCircleIcon as CircleHelp, ScaleIcon as Scale, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, StarIcon as Star, StopIcon as Square, SunIcon as Sun, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
+import { ArrowDownTrayIcon as Download, ArrowPathIcon as RefreshCw, ArrowUturnLeftIcon as RotateCcw, ArrowUpTrayIcon as FileUp, ArrowsPointingInIcon as Minimize2, ArrowsPointingOutIcon as Maximize2, BeakerIcon as Coffee, BookOpenIcon as BookOpen, BookmarkSquareIcon as Save, CheckCircleIcon as CheckCircle2, ChevronRightIcon as ChevronRight, ClockIcon as Clock3, ClockIcon as History, Cog6ToothIcon as Settings, EllipsisVerticalIcon as MoreVertical, ListBulletIcon as List, MoonIcon as Moon, PauseIcon as Pause, PencilIcon as Pencil, PlayIcon as Play, QuestionMarkCircleIcon as CircleHelp, ScaleIcon as Scale, SpeakerWaveIcon as Volume2, SpeakerXMarkIcon as VolumeX, Squares2X2Icon as Grid2X2, StarIcon as Star, StopIcon as Square, SunIcon as Sun, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
 import { createPortal } from 'react-dom'
+import { Coffee as CoffeeIcon, Snowflake, SunSnow } from 'lucide-react'
 import { ActiveBrewSummary } from './ActiveBrewSummary'
 import { ActiveBrewDock } from './ActiveBrewDock'
 import { setAudioEnabled } from './audio'
@@ -924,41 +925,82 @@ function BrewWorkspace({ recipe, coffeeBags, coffeeBagId, onCoffeeBagChange, sta
 }
 
 type RecipeFilter = 'all' | 'hot' | 'iced'
-type RecipeSort = 'name' | 'dose' | 'time'
+type RecipeVisibility = 'all' | 'starred'
+type RecipeSort = 'created-oldest' | 'created-newest' | 'updated'
+type RecipeView = 'grid' | 'list'
 
 function sortRecipes(recipes: BrewRecipe[], sort: RecipeSort) {
   return [...recipes].sort((left, right) => {
-    if (sort === 'dose') return left.coffee - right.coffee || left.name.localeCompare(right.name)
-    if (sort === 'time') return left.brewTime - right.brewTime || left.name.localeCompare(right.name)
-    return left.name.localeCompare(right.name)
+    if (sort === 'created-oldest') return left.createdAt.localeCompare(right.createdAt) || left.name.localeCompare(right.name)
+    if (sort === 'created-newest') return right.createdAt.localeCompare(left.createdAt) || left.name.localeCompare(right.name)
+    return right.updatedAt.localeCompare(left.updatedAt) || left.name.localeCompare(right.name)
   })
 }
 
-function RecipeWorkspace({ recipes, brews, onSelect, onSave, onDelete }: { recipes: BrewRecipe[]; brews: BrewRecord[]; onSelect: (recipe: BrewRecipe) => void; onSave: (recipe: BrewRecipe) => Promise<void>; onDelete: (id: string) => Promise<void> }) {
+function readRecipePreference<T extends string>(key: string, values: readonly T[], fallback: T): T {
+  const value = storedValue(key)
+  return values.includes(value as T) ? value as T : fallback
+}
+
+interface RecipeControlsProps {
+  filter: RecipeFilter
+  onFilterChange: (value: RecipeFilter) => void
+  onImport: () => void
+  onNew: (trigger: HTMLButtonElement) => void
+  onSortChange: (value: RecipeSort) => void
+  onViewChange: (value: RecipeView) => void
+  onVisibilityChange: (value: RecipeVisibility) => void
+  sort: RecipeSort
+  view: RecipeView
+  visibility: RecipeVisibility
+}
+
+function RecipeControls({ filter, onFilterChange, onImport, onNew, onSortChange, onViewChange, onVisibilityChange, sort, view, visibility }: RecipeControlsProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const controlsRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeForOutsideClick = (event: MouseEvent) => {
+      if (event.target instanceof Node && !controlsRef.current?.contains(event.target)) setMenuOpen(false)
+    }
+    const closeForEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault(); setMenuOpen(false)
+      requestAnimationFrame(() => menuButtonRef.current?.focus())
+    }
+    document.addEventListener('mousedown', closeForOutsideClick)
+    document.addEventListener('keydown', closeForEscape)
+    return () => { document.removeEventListener('mousedown', closeForOutsideClick); document.removeEventListener('keydown', closeForEscape) }
+  }, [menuOpen])
+
+  const choose = <T,>(callback: (value: T) => void, value: T) => { callback(value); setMenuOpen(false); requestAnimationFrame(() => menuButtonRef.current?.focus()) }
+
+  return <div className="recipe-library-controls" ref={controlsRef}>
+    <div className="recipe-library-controls__action-row">
+      <div className="recipe-library-controls__desktop-actions"><Button onClick={onImport} type="button" variant="secondary"><FileUp aria-hidden="true" />Import</Button><Button className="new-recipe" onClick={(event) => onNew(event.currentTarget)} type="button" variant="secondary">New recipe</Button></div>
+      <div className="recipe-library-controls__mobile-actions"><Button className="new-recipe" onClick={(event) => onNew(event.currentTarget)} type="button" variant="secondary">New recipe</Button><button aria-controls="recipes-library-controls-menu" aria-expanded={menuOpen} aria-haspopup="dialog" aria-label="Show recipe controls" className="recipe-library-controls__more" onClick={() => setMenuOpen((open) => !open)} ref={menuButtonRef} type="button"><MoreVertical aria-hidden="true" /></button></div>
+    </div>
+    <div className="library-controls recipe-library-controls__desktop"><div className="view-toggle" aria-label="Recipe layout"><button aria-pressed={view === 'grid'} onClick={() => onViewChange('grid')} type="button"><Grid2X2 aria-hidden="true" />Grid</button><button aria-pressed={view === 'list'} onClick={() => onViewChange('list')} type="button"><List aria-hidden="true" />List</button></div><label><span>Serve</span><select onChange={(event) => onFilterChange(event.target.value as RecipeFilter)} value={filter}><option value="all">All recipes</option><option value="hot">Hot brew</option><option value="iced">Iced brew</option></select></label><label><span>Show</span><select onChange={(event) => onVisibilityChange(event.target.value as RecipeVisibility)} value={visibility}><option value="all">All recipes</option><option value="starred">Favourite recipes</option></select></label><label><span>Sort</span><select onChange={(event) => onSortChange(event.target.value as RecipeSort)} value={sort}><option value="created-oldest">Oldest added</option><option value="created-newest">Latest added</option><option value="updated">Recently updated</option></select></label></div>
+    {menuOpen ? <section aria-label="Recipe controls" className="recipe-library-controls__menu" id="recipes-library-controls-menu" role="dialog"><button className="recipe-library-controls__import" onClick={() => { setMenuOpen(false); onImport() }} type="button"><FileUp aria-hidden="true" />Import recipe</button><div><span>Show brews</span><div aria-label="Show brews" className="recipe-library-controls__layout recipe-library-controls__serve-tabs"><button aria-pressed={filter === 'all'} onClick={() => choose(onFilterChange, 'all')} type="button"><SunSnow aria-hidden="true" />All</button><button aria-pressed={filter === 'hot'} onClick={() => choose(onFilterChange, 'hot')} type="button"><CoffeeIcon aria-hidden="true" />Hot</button><button aria-pressed={filter === 'iced'} onClick={() => choose(onFilterChange, 'iced')} type="button"><Snowflake aria-hidden="true" />Iced</button></div></div><div><span>Show layout</span><div className="recipe-library-controls__layout"><button aria-pressed={view === 'grid'} onClick={() => choose(onViewChange, 'grid')} type="button"><Grid2X2 aria-hidden="true" />Grid</button><button aria-pressed={view === 'list'} onClick={() => choose(onViewChange, 'list')} type="button"><List aria-hidden="true" />List</button></div></div><label><span>Show recipes</span><select onChange={(event) => choose(onVisibilityChange, event.target.value as RecipeVisibility)} value={visibility}><option value="all">All recipes</option><option value="starred">Favourite recipes</option></select></label><label><span>Sort recipes</span><select onChange={(event) => choose(onSortChange, event.target.value as RecipeSort)} value={sort}><option value="created-oldest">Oldest added</option><option value="created-newest">Latest added</option><option value="updated">Recently updated</option></select></label></section> : null}
+  </div>
+}
+
+function RecipeWorkspace({ recipes, onSelect, onSave, onDelete }: { recipes: BrewRecipe[]; onSelect: (recipe: BrewRecipe) => void; onSave: (recipe: BrewRecipe) => Promise<void>; onDelete: (id: string) => Promise<void> }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<BrewRecipe | null>(null)
   const [draftBaseline, setDraftBaseline] = useState('')
-  const [filter, setFilter] = useState<RecipeFilter>('all')
-  const [sort, setSort] = useState<RecipeSort>('name')
+  const [filter, setFilter] = useState<RecipeFilter>(() => readRecipePreference('pourframe.recipes.serve.v1', ['all', 'hot', 'iced'], 'all'))
+  const [visibility, setVisibility] = useState<RecipeVisibility>(() => readRecipePreference('pourframe.recipes.visibility.v1', ['all', 'starred'], 'all'))
+  const [sort, setSort] = useState<RecipeSort>(() => readRecipePreference('pourframe.recipes.sort.v1', ['created-oldest', 'created-newest', 'updated'], 'created-oldest'))
+  const [view, setView] = useState<RecipeView>(() => readRecipePreference('pourframe.recipes.view.v1', ['grid', 'list'], 'grid'))
   const [message, setMessage] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
   const sheetTriggerRef = useRef<HTMLElement | null>(null)
-  const visible = useMemo(() => recipes.map(migrateRecipe).filter((recipe) => filter === 'all' || recipe.serveStyle === filter), [filter, recipes])
+  const visible = useMemo(() => recipes.map(migrateRecipe).filter((recipe) => (filter === 'all' || recipe.serveStyle === filter) && (visibility === 'all' || recipe.starred)), [filter, recipes, visibility])
   const selected = visible.find((recipe) => recipe.id === selectedId) ?? recipes.find((recipe) => recipe.id === selectedId) ?? null
-  const starred = useMemo(() => sortRecipes(visible.filter((recipe) => recipe.starred), sort), [sort, visible])
-  const starredIds = useMemo(() => new Set(starred.map((recipe) => recipe.id)), [starred])
-  const recent = useMemo(() => {
-    const seen = new Set(starredIds)
-    const found: BrewRecipe[] = []
-    for (const brew of [...brews].sort((left, right) => Date.parse(right.completed_at) - Date.parse(left.completed_at))) {
-      const recipe = visible.find((item) => item.id === brew.recipe.id)
-      if (recipe && !seen.has(recipe.id)) { seen.add(recipe.id); found.push(recipe) }
-      if (found.length === 3) break
-    }
-    return found
-  }, [brews, starredIds, visible])
-  const recentIds = useMemo(() => new Set(recent.map((recipe) => recipe.id)), [recent])
-  const all = useMemo(() => sortRecipes(visible.filter((recipe) => !starredIds.has(recipe.id) && !recentIds.has(recipe.id)), sort), [recentIds, sort, starredIds, visible])
+  const sorted = useMemo(() => sortRecipes(visible, sort), [sort, visible])
   const toggleStar = async (recipe: BrewRecipe) => { try { await onSave({ ...recipe, starred: !recipe.starred }) } catch (error) { setMessage(error instanceof Error ? error.message : 'Recipe could not be updated.') } }
   const openDraft = (recipe: BrewRecipe, keepDetail = false) => { setDraft(recipe); setDraftBaseline(JSON.stringify(recipe)); if (!keepDetail) setSelectedId(null) }
   const discardDraft = () => {
@@ -987,15 +1029,20 @@ function RecipeWorkspace({ recipes, brews, onSelect, onSave, onDelete }: { recip
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Recipe could not be imported.') }
     finally { if (fileInput.current) fileInput.current.value = '' }
   }
+  useEffect(() => { storeValue('pourframe.recipes.serve.v1', filter) }, [filter])
+  useEffect(() => { storeValue('pourframe.recipes.visibility.v1', visibility) }, [visibility])
+  useEffect(() => { storeValue('pourframe.recipes.sort.v1', sort) }, [sort])
+  useEffect(() => { storeValue('pourframe.recipes.view.v1', view) }, [view])
   const numberField = (label: string, field: keyof BrewRecipe, step: number, suffix: string) => draft ? <label className="recipe-field"><span>{label}</span><div><input inputMode={step < 1 ? 'decimal' : 'numeric'} min="0" onChange={(event) => setDraft((current) => current ? updateRecipeNumber(current, field, Number(event.target.value)) : current)} step={step} type="number" value={formatRecipeInput(Number(draft[field]))} /><small>{suffix}</small></div></label> : null
   const recipeCard = (recipe: BrewRecipe) => <LibraryItemCard className="recipe-card" key={recipe.id} label={recipe.name} onOpen={() => setSelectedId(recipe.id)} onToggleStar={() => void toggleStar(recipe)} openClassName="recipe-card__open" starred={recipe.starred}><strong className="card-title">{recipe.name}</strong><span>{recipe.serveStyle === 'iced' ? 'Iced brew' : 'Hot brew'} · {recipe.dripper}</span><small>{formatRecipeWeight(recipe.coffee)} g coffee · {formatRecipeWeight(expectedRecipeYield(recipe))} g yield · {formatTime(recipe.brewTime)}</small></LibraryItemCard>
-  const group = (title: string, values: BrewRecipe[]) => values.length ? <section className="library-group"><SectionHeader count={values.length} title={title} variant="compact" /><div className="recipe-collection">{values.map(recipeCard)}</div></section> : null
+  const group = sorted.length ? <section className="library-group"><SectionHeader count={sorted.length} title="Recipes" variant="compact" /><div className={`recipe-collection recipe-collection--${view}`}>{sorted.map(recipeCard)}</div></section> : null
   return <section className="library-workspace recipe-library-workspace" data-tour="recipe-library">
-    <PageHeader actions={<div className="library-header-actions"><input accept="application/json,.json" aria-label="Import recipe" hidden onChange={(event) => void importRecipe(event.target.files?.[0])} ref={fileInput} type="file" /><Button onClick={() => fileInput.current?.click()} type="button" variant="secondary"><FileUp aria-hidden="true" />Import</Button><Button className="new-recipe" onClick={(event) => { sheetTriggerRef.current = event.currentTarget; openDraft({ ...defaultRecipes[0], id: createId('recipe'), name: 'New recipe', starred: false, serveStyle: 'hot' }) }} variant="secondary">New recipe</Button></div>} className="library-workspace__header" description="Choose a trusted recipe, then send it to the brew dock." eyebrow="Shared library" title="Recipes" variant="library" />
-    <div className="library-controls"><label><span>Serve</span><select onChange={(event) => setFilter(event.target.value as RecipeFilter)} value={filter}><option value="all">All recipes</option><option value="hot">Hot brew</option><option value="iced">Iced brew</option></select></label><label><span>Sort</span><select onChange={(event) => setSort(event.target.value as RecipeSort)} value={sort}><option value="name">Name A–Z</option><option value="dose">Coffee dose</option><option value="time">Brew time</option></select></label></div>
-    {group('Starred', starred)}{group('Last brewed', recent)}{group('All recipes', all)}
+    <PageHeader className="library-workspace__header" description="Choose a trusted recipe, then send it to the brew dock." eyebrow="Shared library" title="Recipes" variant="library" />
+    <input accept="application/json,.json" aria-label="Import recipe" hidden onChange={(event) => void importRecipe(event.target.files?.[0])} ref={fileInput} type="file" />
+    <RecipeControls filter={filter} onFilterChange={setFilter} onImport={() => fileInput.current?.click()} onNew={(trigger) => { sheetTriggerRef.current = trigger; openDraft({ ...defaultRecipes[0], id: createId('recipe'), name: 'New recipe', starred: false, serveStyle: 'hot' }) }} onSortChange={setSort} onViewChange={setView} onVisibilityChange={setVisibility} sort={sort} view={view} visibility={visibility} />
+    {group}
     <CatalogRecipes onSave={onSave} recipes={recipes} />
-    {!visible.length ? <EmptyState description="Change the filter or add a new recipe." icon={<BookOpen aria-hidden="true" />} title="No matching recipes" /> : null}<p className="library-message" role="status">{message}</p>
+    {!sorted.length ? <EmptyState description="Change the filters or add a new recipe." icon={<BookOpen aria-hidden="true" />} title="No matching recipes" /> : null}<p className="library-message" role="status">{message}</p>
     {draft ? <ModalSheet
       actions={<button className="modal-sheet__save" onClick={() => void save()} type="button"><Save aria-hidden="true" />Save recipe</button>}
       dirty={JSON.stringify(draft) !== draftBaseline}
@@ -1282,7 +1329,7 @@ function App() {
     <div className="appliance-body">
       {tab === 'brew' ? <BrewWorkspace recipe={recipe} coffeeBags={library.coffeeBags} coffeeBagId={coffeeBagId} onCoffeeBagChange={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} status={guided.status} elapsed={guided.elapsed} mode={guided.machine.mode} telemetry={device.liveTelemetry} machine={guided.machine} relative={guided.relative} cue={guided.physicalCue} message={guided.message} traceBuffer={guided.traceBuffer!} dualTare={dualTare} canStartDevice={canStartDevice} canResumeDevice={canStartDevice} deviceBlocked={guided.deviceBlocked} onStart={openBrewSelection} onPause={guided.pauseResume} onReset={guided.reset} onFinish={guided.finish} onManualAdvance={guided.manualAdvance} onTimerOnly={guided.continueTimerOnly} onOpenFocus={openBrewFocus} /> : null}
       {tab === 'beans' ? <CoffeeBagWorkspace bags={library.coffeeBags} onDelete={library.deleteCoffeeBag} onSave={library.saveCoffeeBag} onUse={(id) => { coffeeBagSelectionInitialized.current = true; setCoffeeBagId(id) }} /> : null}
-      {tab === 'recipes' ? <RecipeWorkspace brews={library.brews} onDelete={async (id) => { await library.deleteRecipe(id); if (recipe.id === id) selectRecipe(library.recipes.find((item) => item.id !== id) ?? defaultRecipes[0]) }} onSave={library.saveRecipe} onSelect={selectRecipe} recipes={library.recipes} /> : null}
+      {tab === 'recipes' ? <RecipeWorkspace onDelete={async (id) => { await library.deleteRecipe(id); if (recipe.id === id) selectRecipe(library.recipes.find((item) => item.id !== id) ?? defaultRecipes[0]) }} onSave={library.saveRecipe} onSelect={selectRecipe} recipes={library.recipes} /> : null}
       {tab === 'history' ? <HistoryWorkspace brews={library.brews} onPrepare={openBrewSelection} /> : null}
       {tab === 'device' ? <DeviceWorkspace availability={device.availability} canInstall={pwaInstall.canInstall} connection={device.connection} dualTare={dualTare} historyCount={library.brews.length} lastUpdateAt={device.lastUpdateAt} mockMode={device.mockMode} onboardingEnabled={!onboardingBlocked} onClearHistory={library.clearBrews} onInstall={() => void pwaInstall.install()} onOpenOnboarding={openOnboarding} onThemePreferenceChange={setThemePreference} onToggleSound={toggleSound} saveWifi={device.saveWifi} sendCommand={device.sendCommand} sound={sound} telemetry={device.liveTelemetry} themePreference={themePreference} /> : null}
     </div>

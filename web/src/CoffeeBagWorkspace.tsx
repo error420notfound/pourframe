@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowPathIcon as RotateCcw, BeakerIcon as Coffee, BookmarkSquareIcon as Save, ListBulletIcon as List, PencilIcon as Pencil, PlusIcon as Plus, Squares2X2Icon as Grid2X2, StarIcon as Star, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
+import { ArrowPathIcon as RotateCcw, BeakerIcon as Coffee, BookmarkSquareIcon as Save, EllipsisVerticalIcon as MoreVertical, ListBulletIcon as List, PencilIcon as Pencil, PlusIcon as Plus, Squares2X2Icon as Grid2X2, StarIcon as Star, TrashIcon as Trash2, XMarkIcon as X } from '@heroicons/react/24/solid'
 import {
   beanForms,
   createCoffeeBag,
@@ -25,6 +25,62 @@ const viewPreferenceKey = 'pourframe.coffeeBags.view.v1'
 
 function readPreference<T extends string>(key: string, valid: readonly T[], fallback: T): T {
   try { const value = localStorage.getItem(key); return valid.includes(value as T) ? value as T : fallback } catch { return fallback }
+}
+
+interface CoffeeBagControlsProps {
+  filter: CoffeeBagFilter
+  onAdd: (trigger: HTMLButtonElement) => void
+  onFilterChange: (filter: CoffeeBagFilter) => void
+  onSortChange: (sort: CoffeeBagSort) => void
+  onViewChange: (view: 'grid' | 'list') => void
+  sort: CoffeeBagSort
+  view: 'grid' | 'list'
+}
+
+function CoffeeBagControls({ filter, onAdd, onFilterChange, onSortChange, onViewChange, sort, view }: CoffeeBagControlsProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const controlsRef = useRef<HTMLDivElement>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeForOutsideClick = (event: MouseEvent) => {
+      if (event.target instanceof Node && !controlsRef.current?.contains(event.target)) setMenuOpen(false)
+    }
+    const closeForEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setMenuOpen(false)
+      requestAnimationFrame(() => menuButtonRef.current?.focus())
+    }
+    document.addEventListener('mousedown', closeForOutsideClick)
+    document.addEventListener('keydown', closeForEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeForOutsideClick)
+      document.removeEventListener('keydown', closeForEscape)
+    }
+  }, [menuOpen])
+
+  const selectView = (nextView: 'grid' | 'list') => { onViewChange(nextView); setMenuOpen(false); requestAnimationFrame(() => menuButtonRef.current?.focus()) }
+  const selectFilter = (nextFilter: CoffeeBagFilter) => { onFilterChange(nextFilter); setMenuOpen(false); requestAnimationFrame(() => menuButtonRef.current?.focus()) }
+  const selectSort = (nextSort: CoffeeBagSort) => { onSortChange(nextSort); setMenuOpen(false); requestAnimationFrame(() => menuButtonRef.current?.focus()) }
+
+  return <div className="bean-library-controls" ref={controlsRef}>
+    <div className="bean-library-controls__action-row">
+      <Button className="new-recipe" onClick={(event) => onAdd(event.currentTarget)} type="button" variant="secondary"><Plus aria-hidden="true" />Add bag</Button>
+      <button aria-controls="beans-library-controls-menu" aria-expanded={menuOpen} aria-haspopup="dialog" aria-label="Show bag controls" className="bean-library-controls__more" onClick={() => setMenuOpen((open) => !open)} ref={menuButtonRef} type="button"><MoreVertical aria-hidden="true" /></button>
+    </div>
+    <div className="library-controls bean-library-controls__desktop">
+      <div className="view-toggle" aria-label="Inventory layout"><button aria-pressed={view === 'grid'} onClick={() => onViewChange('grid')} type="button"><Grid2X2 aria-hidden="true" />Grid</button><button aria-pressed={view === 'list'} onClick={() => onViewChange('list')} type="button"><List aria-hidden="true" />List</button></div>
+      <label><span>Show</span><select onChange={(event) => onFilterChange(event.target.value as CoffeeBagFilter)} value={filter}><option value="active">Active</option><option value="depleted">Depleted</option><option value="all">All bags</option></select></label>
+      <label><span>Sort</span><select onChange={(event) => onSortChange(event.target.value as CoffeeBagSort)} value={sort}><option value="roast-oldest">Oldest roast</option><option value="roast-newest">Newest roast</option><option value="remaining-low">Lowest remaining</option><option value="remaining-high">Most remaining</option><option value="roastery">Roastery A–Z</option><option value="name">Coffee name A–Z</option><option value="updated">Recently updated</option></select></label>
+    </div>
+    {menuOpen ? <section aria-label="Bag controls" className="bean-library-controls__menu" id="beans-library-controls-menu" role="dialog">
+      <div><span>Show layout</span><div className="bean-library-controls__layout"><button aria-pressed={view === 'grid'} onClick={() => selectView('grid')} type="button"><Grid2X2 aria-hidden="true" />Grid</button><button aria-pressed={view === 'list'} onClick={() => selectView('list')} type="button"><List aria-hidden="true" />List</button></div></div>
+      <label><span>Show bags</span><select onChange={(event) => selectFilter(event.target.value as CoffeeBagFilter)} value={filter}><option value="active">Active bags</option><option value="depleted">Depleted</option><option value="all">All bags</option></select></label>
+      <label><span>Sort bags</span><select onChange={(event) => selectSort(event.target.value as CoffeeBagSort)} value={sort}><option value="roast-oldest">Oldest roast</option><option value="roast-newest">Newest roast</option><option value="remaining-low">Lowest remaining</option><option value="remaining-high">Most remaining</option><option value="roastery">Roastery A–Z</option><option value="name">Coffee name A–Z</option><option value="updated">Recently updated</option></select></label>
+    </section> : null}
+  </div>
 }
 
 function RatingField({ label, value, onChange }: { label: string; value?: number; onChange: (value: number | undefined) => void }) {
@@ -183,8 +239,8 @@ export function CoffeeBagWorkspace({ bags, onSave, onDelete, onUse }: { bags: Co
   const renderGroup = (title: string, group: CoffeeBagRecord[]) => group.length ? <section className="library-group"><SectionHeader count={group.length} title={title} variant="compact" /><div className={`bag-collection bag-collection--${view}`}>{group.map((bag) => <BagCard bag={bag} key={bag.id} onOpen={() => setSelectedId(bag.id)} onStar={() => void toggleStar(bag)} view={view} />)}</div></section> : null
 
   return <section className="library-workspace coffee-library-workspace" data-tour="beans-library">
-    <PageHeader actions={<Button className="new-recipe" onClick={(event) => { sheetTriggerRef.current = event.currentTarget; openEditor(createCoffeeBag()) }} variant="secondary"><Plus aria-hidden="true" />Add bag</Button>} className="library-workspace__header" description="Keep the coffees you have on hand ready for your next brew." eyebrow="Shared inventory" title="Beans" variant="library" />
-    <div className="library-controls"><div className="view-toggle" aria-label="Inventory layout"><button aria-pressed={view === 'grid'} onClick={() => setView('grid')} type="button"><Grid2X2 aria-hidden="true" />Grid</button><button aria-pressed={view === 'list'} onClick={() => setView('list')} type="button"><List aria-hidden="true" />List</button></div><label><span>Show</span><select onChange={(event) => setFilter(event.target.value as CoffeeBagFilter)} value={filter}><option value="active">Active</option><option value="depleted">Depleted</option><option value="all">All bags</option></select></label><label><span>Sort</span><select onChange={(event) => setSort(event.target.value as CoffeeBagSort)} value={sort}><option value="roast-oldest">Oldest roast</option><option value="roast-newest">Newest roast</option><option value="remaining-low">Lowest remaining</option><option value="remaining-high">Most remaining</option><option value="roastery">Roastery A–Z</option><option value="name">Coffee name A–Z</option><option value="updated">Recently updated</option></select></label></div>
+    <PageHeader className="library-workspace__header" description="Keep the coffees you have on hand ready for your next brew." eyebrow="Shared inventory" title="Beans" variant="library" />
+    <CoffeeBagControls filter={filter} onAdd={(trigger) => { sheetTriggerRef.current = trigger; openEditor(createCoffeeBag()) }} onFilterChange={setFilter} onSortChange={setSort} onViewChange={setView} sort={sort} view={view} />
     {renderGroup('Starred', starred)}
     {renderGroup(filter === 'all' ? 'All bags' : filter === 'active' ? 'Active bags' : 'Depleted bags', remaining)}
     {!starred.length && !remaining.length ? <EmptyState description="Add a bag or change the filter." icon={<Coffee aria-hidden="true" />} title="No coffee bags here yet" /> : null}

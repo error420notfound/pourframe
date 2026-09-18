@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { deriveActiveBrewSummary } from './brewSummaryModel'
-import { buildSchedule, expectedRecipeYield, formatRecipeInput, migrateRecipe, updateRecipeNumber, validateRecipe } from './brew'
+import { buildSchedule, expectedRecipeYield, formatRecipeInput, migrateRecipe, needsRecipeTimestampMigration, normalizeRecipe, updateRecipeNumber, validateRecipe } from './brew'
 import { createCoffeeBag, filterCoffeeBags, normalizeCoffeeBag, snapshotCoffeeBag, sortCoffeeBags, validateCoffeeBag } from './coffeeBag'
 import { captureBaseline, completePairedTelemetry, initialBrewMachine, liveScaleTelemetry, reduceBrewMachine, relativeReadings, stablePairedTelemetry } from './brewMachine'
 import { addSensorSample, newSensorSummary, prepareDevice } from './brewSession'
@@ -126,13 +126,28 @@ describe('recipe semantics', () => {
   })
 
   it('migrates legacy pours literally and validates bloom', () => {
-    const { starred: _starred, serveStyle: _serveStyle, ...legacyRecipe } = defaultRecipes[0]
+    const { starred: _starred, serveStyle: _serveStyle, createdAt: _createdAt, updatedAt: _updatedAt, ...legacyRecipe } = defaultRecipes[0]
     const legacy = { ...legacyRecipe, poursAfterBloom: undefined, pours: 4 } as unknown as typeof defaultRecipes[number]
     const migrated = migrateRecipe(legacy)
     expect(migrated.poursAfterBloom).toBe(4)
     expect(migrated.starred).toBe(false)
     expect(migrated.serveStyle).toBe('hot')
+    expect(needsRecipeTimestampMigration(migrated)).toBe(true)
     expect(validateRecipe({ ...defaultRecipes[0], bloom: 320 }).errors.bloom).toBeTruthy()
+  })
+
+  it('stamps legacy recipes on their first save and refreshes only updatedAt later', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-19T10:00:00.000Z'))
+    const legacy = migrateRecipe(({ ...defaultRecipes[0], createdAt: undefined, updatedAt: undefined } as unknown as typeof defaultRecipes[number]))
+    const firstSave = normalizeRecipe(legacy)
+    expect(firstSave.createdAt).toBe('2026-09-19T10:00:00.000Z')
+    expect(firstSave.updatedAt).toBe('2026-09-19T10:00:00.000Z')
+    vi.setSystemTime(new Date('2026-09-20T10:00:00.000Z'))
+    const savedAgain = normalizeRecipe({ ...firstSave, starred: !firstSave.starred })
+    expect(savedAgain.createdAt).toBe(firstSave.createdAt)
+    expect(savedAgain.updatedAt).toBe('2026-09-20T10:00:00.000Z')
+    vi.useRealTimers()
   })
 
   it('calculates expected yield from the precise coffee and ratio values', () => {

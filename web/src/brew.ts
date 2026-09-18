@@ -1,6 +1,11 @@
 import type { BrewRecipe, BrewStep } from './brewTypes'
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(Math.max(value, minimum), maximum)
+const legacyRecipeTimestamp = new Date(0).toISOString()
+
+function timestampOr(value: unknown, fallback: string) {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : fallback
+}
 
 export const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 /** Shared by the physical/audio countdown and the focus-graph cue emphasis. */
@@ -25,14 +30,20 @@ export function expectedRecipeYield(recipe: Pick<BrewRecipe, 'coffee' | 'ratio'>
 }
 
 export function migrateRecipe(recipe: BrewRecipe | (Omit<BrewRecipe, 'poursAfterBloom'> & { pours: number })): BrewRecipe {
-  const legacy = recipe as BrewRecipe & { pours?: number }
+  const legacy = recipe as BrewRecipe & { pours?: number; createdAt?: unknown; updatedAt?: unknown }
   return {
     ...legacy,
     poursAfterBloom: Number.isFinite(legacy.poursAfterBloom) ? legacy.poursAfterBloom : legacy.pours ?? 1,
     pours: undefined,
     starred: legacy.starred === true,
     serveStyle: legacy.serveStyle === 'iced' ? 'iced' : 'hot',
+    createdAt: timestampOr(legacy.createdAt, legacyRecipeTimestamp),
+    updatedAt: timestampOr(legacy.updatedAt, legacyRecipeTimestamp),
   }
+}
+
+export function needsRecipeTimestampMigration(recipe: BrewRecipe) {
+  return recipe.createdAt === legacyRecipeTimestamp || recipe.updatedAt === legacyRecipeTimestamp
 }
 
 export interface RecipeValidation { valid: boolean; errors: Partial<Record<'coffee' | 'water' | 'ratio' | 'bloom' | 'poursAfterBloom', string>> }
@@ -51,11 +62,14 @@ export function validateRecipe(input: BrewRecipe): RecipeValidation {
 
 export function normalizeRecipe(input: BrewRecipe): BrewRecipe {
   const recipe = migrateRecipe(input)
+  const now = new Date().toISOString()
   return {
     ...recipe,
     brewTime: Math.round(clamp(recipe.brewTime, 90, 420)),
     flowRate: clamp(recipe.flowRate, 1, 8),
     temperature: Math.round(clamp(recipe.temperature, 80, 100)),
+    createdAt: needsRecipeTimestampMigration(recipe) ? now : recipe.createdAt,
+    updatedAt: now,
   }
 }
 
